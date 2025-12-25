@@ -46,6 +46,8 @@ export interface UseProjectSettingsReturn {
   setShowOpenAIKey: React.Dispatch<React.SetStateAction<boolean>>;
   showGitHubToken: boolean;
   setShowGitHubToken: React.Dispatch<React.SetStateAction<boolean>>;
+  showDatabaseUrl: boolean;
+  setShowDatabaseUrl: React.Dispatch<React.SetStateAction<boolean>>;
 
   // Collapsible sections
   expandedSections: Record<string, boolean>;
@@ -95,13 +97,15 @@ export function useProjectSettings(
   const [showClaudeToken, setShowClaudeToken] = useState(false);
   const [showLinearKey, setShowLinearKey] = useState(false);
   const [showOpenAIKey, setShowOpenAIKey] = useState(false);
+  const [showDatabaseUrl, setShowDatabaseUrl] = useState(false);
 
   // Collapsible sections
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     claude: true,
     linear: false,
     github: false,
-    graphiti: false
+    graphiti: false,
+    advancedConfig: false
   });
 
   // GitHub state
@@ -385,6 +389,8 @@ export function useProjectSettings(
     setShowOpenAIKey,
     showGitHubToken,
     setShowGitHubToken,
+    showDatabaseUrl,
+    setShowDatabaseUrl,
     expandedSections,
     toggleSection,
     gitHubConnectionStatus,

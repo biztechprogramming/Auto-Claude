@@ -56,15 +56,23 @@ export class ChangelogService extends EventEmitter {
   private detectClaudePath(): void {
     const homeDir = os.homedir();
 
+    // Common Windows npm/node locations
+    const npmGlobalDir = path.join(homeDir, 'AppData', 'Roaming', 'npm');
+    const nvm4wDir = 'C:\\nvm4w\\nodejs';
+
     // Platform-specific possible paths
     const possiblePaths = process.platform === 'win32'
       ? [
           // Windows paths
           path.join(homeDir, 'AppData', 'Local', 'Programs', 'claude', 'claude.exe'),
-          path.join(homeDir, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
+          path.join(npmGlobalDir, 'claude.cmd'),
+          path.join(npmGlobalDir, 'claude.ps1'),
           path.join(homeDir, '.local', 'bin', 'claude.exe'),
           'C:\\Program Files\\Claude\\claude.exe',
           'C:\\Program Files (x86)\\Claude\\claude.exe',
+          // nvm4w installs npm packages here
+          path.join(nvm4wDir, 'claude.cmd'),
+          path.join(nvm4wDir, 'claude.ps1'),
           // Also check if claude is in system PATH
           'claude'
         ]

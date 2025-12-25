@@ -295,12 +295,15 @@ Assistant:"""
 
     try:
         # Try to use claude CLI with --print for simple output
+        # shell=True on Windows to handle .ps1 and .cmd wrappers
+        import platform
         result = subprocess.run(
             ["claude", "--print", "-p", full_prompt],
             capture_output=True,
             text=True,
             cwd=project_dir,
             timeout=120,
+            shell=(platform.system() == "Windows"),
         )
 
         if result.returncode == 0:

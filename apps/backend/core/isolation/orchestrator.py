@@ -108,18 +108,55 @@ class DockerOrchestrator:
                     check=True,
                 )
 
+    def _is_container_running(self, container_name: str) -> bool:
+        """Check if a container is running."""
+        result = subprocess.run(
+            ["docker", "ps", "-q", "-f", f"name={container_name}"],
+            capture_output=True,
+            text=True,
+        )
+        return bool(result.stdout.strip())
+
+    def _container_exists(self, container_name: str) -> bool:
+        """Check if a container exists (running or stopped)."""
+        result = subprocess.run(
+            ["docker", "ps", "-a", "-q", "-f", f"name={container_name}"],
+            capture_output=True,
+            text=True,
+        )
+        return bool(result.stdout.strip())
+
+    def get_container_status(self, spec_name: str) -> dict[ContainerRole, str]:
+        """
+        Get status of all containers for a spec.
+
+        Returns:
+            Dict mapping role to status: "running", "stopped", "not_found"
+        """
+        status = {}
+        for role in ContainerRole:
+            container_name = self._get_container_name(spec_name, role)
+            if self._is_container_running(container_name):
+                status[role] = "running"
+            elif self._container_exists(container_name):
+                status[role] = "stopped"
+            else:
+                status[role] = "not_found"
+        return status
+
     def cleanup_containers(self, spec_name: str) -> None:
         """Stop and remove all containers for a spec."""
         for role in ContainerRole:
             container_name = self._get_container_name(spec_name, role)
-            subprocess.run(
-                ["docker", "stop", container_name],
-                capture_output=True,
-            )
-            subprocess.run(
-                ["docker", "rm", container_name],
-                capture_output=True,
-            )
+            if self._container_exists(container_name):
+                subprocess.run(
+                    ["docker", "stop", container_name],
+                    capture_output=True,
+                )
+                subprocess.run(
+                    ["docker", "rm", container_name],
+                    capture_output=True,
+                )
 
     async def run_developer(
         self,
@@ -131,7 +168,11 @@ class DockerOrchestrator:
         """
         Run the developer container.
 
-        1. Clone repo with depth=1
+        Uses a persistent container that's reused across iterations for speed.
+        First run: Creates container, clones repo, sets up environment
+        Subsequent runs: Reuses container, just pulls latest and runs agent
+
+        1. Clone repo with depth=1 (first run only)
         2. Create/checkout feature branch
         3. Implement the plan (addressing any feedback)
         4. Commit and push changes
@@ -159,25 +200,62 @@ class DockerOrchestrator:
                 for c in feedback_comments
             ])
 
-        # Build docker run command
-        cmd = [
-            "docker", "run", "--rm",
-            "--name", container_name,
-            "--memory", self.memory_limit,
-            "--cpu-shares", self.cpu_shares,
-            "--pids-limit", "256",
-        ]
+        # Check if developer container already exists and is running
+        if self._is_container_running(container_name):
+            # Reuse existing container with docker exec
+            cmd = ["docker", "exec"]
 
-        # Add environment variables
-        for key, value in env_vars.items():
-            cmd.extend(["-e", f"{key}={value}"])
+            # Add environment variables
+            for key, value in env_vars.items():
+                cmd.extend(["-e", f"{key}={value}"])
 
-        cmd.extend([
-            self.images[ContainerRole.DEVELOPER],
-            "python", "/scripts/developer_agent.py",
-        ])
+            cmd.extend([
+                container_name,
+                "python", "/scripts/developer_agent.py",
+            ])
+        else:
+            # Create new persistent container (no --rm)
+            # Stop and remove if it exists but isn't running
+            if self._container_exists(container_name):
+                subprocess.run(
+                    ["docker", "rm", "-f", container_name],
+                    capture_output=True,
+                )
 
-        # Run container
+            # Create persistent container that stays running
+            cmd = [
+                "docker", "run",
+                "-d",  # Detached mode
+                "--name", container_name,
+                "--memory", self.memory_limit,
+                "--cpu-shares", self.cpu_shares,
+                "--pids-limit", "256",
+            ]
+
+            # Add environment variables
+            for key, value in env_vars.items():
+                cmd.extend(["-e", f"{key}={value}"])
+
+            cmd.extend([
+                self.images[ContainerRole.DEVELOPER],
+                "tail", "-f", "/dev/null",  # Keep container running
+            ])
+
+            # Create container
+            await asyncio.to_thread(
+                subprocess.run, cmd, capture_output=True, text=True, check=True
+            )
+
+            # Now execute the agent script in the running container
+            cmd = ["docker", "exec"]
+            for key, value in env_vars.items():
+                cmd.extend(["-e", f"{key}={value}"])
+            cmd.extend([
+                container_name,
+                "python", "/scripts/developer_agent.py",
+            ])
+
+        # Run container or exec into existing container
         result = await asyncio.to_thread(
             subprocess.run, cmd, capture_output=True, text=True
         )

@@ -62,17 +62,44 @@ ISOLATION_METHOD=docker    # Multi-container pipeline
 
 ### Container Responsibilities
 
-| Container | Purpose | Image | Actions |
-|-----------|---------|-------|---------|
-| Developer | Implement code changes | `auto-claude-dev` | Clone (depth=1), create branch, implement plan, commit, push |
-| Evaluator | Code quality review | `auto-claude-eval` | Clone feature branch, run quality prompts, approve or reject with comments |
-| QA | Functional testing | `auto-claude-qa` | Clone feature branch, run Playwright tests, pass or reject with comments |
+| Container | Purpose | Image | Lifecycle | Actions |
+|-----------|---------|-------|-----------|---------|
+| Developer | Implement code changes | `auto-claude-dev` | **Persistent** - Reused across iterations | First run: Clone (depth=1), create branch. Subsequent runs: Pull latest, implement feedback |
+| Evaluator | Code quality review | `auto-claude-eval` | **One-shot** - Created per review | Clone feature branch, run quality prompts, approve or reject with comments |
+| QA | Functional testing | `auto-claude-qa` | **One-shot** - Created per test run | Clone feature branch, run Playwright tests, pass or reject with comments |
 
 ### Feedback Loops
 
-1. **Evaluator → Developer**: Quality issues found → comments added → Developer container recreated to fix
-2. **QA → Developer**: Tests fail → comments added → Developer container recreated to fix
+1. **Evaluator → Developer**: Quality issues found → comments added → **Developer container reused** to fix (fast iteration)
+2. **QA → Developer**: Tests fail → comments added → **Developer container reused** to fix (fast iteration)
 3. **All feedback** routes through orchestrator which updates kanban state
+
+### Container Lifecycle & Cleanup
+
+**Developer Container:**
+- **Created once** per spec when first needed
+- **Reused** across all feedback iterations (faster performance)
+- **Cleaned up** automatically when:
+  - Spec is approved and merged (`merge_changes()`)
+  - Spec is discarded (`remove_environment(cleanup_branch=True)`)
+  - Manual cleanup (`cleanup_containers()`)
+
+**Evaluator/QA Containers:**
+- **Created per run** as needed
+- **Auto-removed** after completion (`docker run --rm`)
+- No persistence required
+
+**Example:**
+```python
+# Iteration 1: Developer container created
+dev_result = run_developer(...)  # Creates persistent container
+
+# Iteration 2: Developer container reused (fast!)
+dev_result = run_developer(...)  # Reuses existing container
+
+# After approval
+strategy.merge_changes("feature-x")  # Cleans up all containers
+```
 
 ### All Containers Include
 

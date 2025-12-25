@@ -321,7 +321,12 @@ class DockerIsolationStrategy(IsolationStrategy):
             )
 
     def merge_changes(self, spec_name: str, delete_after: bool = False) -> bool:
-        """Merge spec branch to base branch."""
+        """
+        Merge spec branch to base branch.
+
+        IMPORTANT: Always cleans up Docker containers, even if delete_after=False.
+        Containers are temporary build artifacts and should be removed after merge.
+        """
         branch_name = f"auto-claude/{spec_name}"
         base = self.base_branch or "main"
 
@@ -352,7 +357,12 @@ class DockerIsolationStrategy(IsolationStrategy):
             )
             return False
 
+        # Always cleanup containers after successful merge
+        print(f"Cleaning up Docker containers for {spec_name}...")
+        self._orchestrator.cleanup_containers(spec_name)
+
         if delete_after:
+            # Also delete the branch
             self.remove_environment(spec_name, cleanup_branch=True)
 
         return True
@@ -405,3 +415,18 @@ class DockerIsolationStrategy(IsolationStrategy):
             if len(parts) == 2:
                 files.append((parts[0], parts[1]))
         return files
+
+    def get_container_status(self, spec_name: str) -> dict:
+        """
+        Get status of all Docker containers for a spec.
+
+        Returns:
+            Dict with container status information:
+            {
+                "developer": "running" | "stopped" | "not_found",
+                "evaluator": "running" | "stopped" | "not_found",
+                "qa": "running" | "stopped" | "not_found"
+            }
+        """
+        status = self._orchestrator.get_container_status(spec_name)
+        return {role.value: state for role, state in status.items()}

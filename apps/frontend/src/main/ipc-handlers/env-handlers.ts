@@ -108,6 +108,16 @@ export function registerEnvHandlers(
     if (config.enableFancyUi !== undefined) {
       existingVars['ENABLE_FANCY_UI'] = config.enableFancyUi ? 'true' : 'false';
     }
+    // Advanced Configuration
+    if (config.repoUrl !== undefined) {
+      existingVars['REPO_URL'] = config.repoUrl;
+    }
+    if (config.databaseUrl !== undefined) {
+      existingVars['DATABASE_URL'] = config.databaseUrl;
+    }
+    if (config.maxFeedbackIterations !== undefined) {
+      existingVars['MAX_FEEDBACK_ITERATIONS'] = String(config.maxFeedbackIterations);
+    }
 
     // Generate content with sections
     const content = `# Auto Claude Framework Environment Variables
@@ -140,6 +150,18 @@ ${existingVars['GITHUB_AUTO_SYNC'] !== undefined ? `GITHUB_AUTO_SYNC=${existingV
 # Default base branch for worktree creation
 # If not set, Auto Claude will auto-detect main/master, or fall back to current branch
 ${existingVars['DEFAULT_BRANCH'] ? `DEFAULT_BRANCH=${existingVars['DEFAULT_BRANCH']}` : '# DEFAULT_BRANCH=main'}
+
+# =============================================================================
+# ADVANCED CONFIGURATION (OPTIONAL)
+# =============================================================================
+# Repository URL override (overrides git remote auto-detection)
+${existingVars['REPO_URL'] ? `REPO_URL=${existingVars['REPO_URL']}` : '# REPO_URL=https://github.com/user/repo.git'}
+
+# Database connection string (for container-based setups)
+${existingVars['DATABASE_URL'] ? `DATABASE_URL=${existingVars['DATABASE_URL']}` : '# DATABASE_URL=postgresql://user:pass@host:5432/db'}
+
+# Maximum feedback iterations before failing (default: 3)
+${existingVars['MAX_FEEDBACK_ITERATIONS'] ? `MAX_FEEDBACK_ITERATIONS=${existingVars['MAX_FEEDBACK_ITERATIONS']}` : '# MAX_FEEDBACK_ITERATIONS=3'}
 
 # =============================================================================
 # UI SETTINGS (OPTIONAL)

@@ -278,6 +278,24 @@ ${existingVars['GRAPHITI_DB_PATH'] ? `GRAPHITI_DB_PATH=${existingVars['GRAPHITI_
         config.defaultBranch = vars['DEFAULT_BRANCH'];
       }
 
+      // Repository URL override
+      if (vars['REPO_URL']) {
+        config.repoUrl = vars['REPO_URL'];
+      }
+
+      // Database URL
+      if (vars['DATABASE_URL']) {
+        config.databaseUrl = vars['DATABASE_URL'];
+      }
+
+      // Max feedback iterations
+      if (vars['MAX_FEEDBACK_ITERATIONS']) {
+        const iterations = parseInt(vars['MAX_FEEDBACK_ITERATIONS'], 10);
+        if (!isNaN(iterations) && iterations > 0) {
+          config.maxFeedbackIterations = iterations;
+        }
+      }
+
       if (vars['GRAPHITI_ENABLED']?.toLowerCase() === 'true') {
         config.graphitiEnabled = true;
       }

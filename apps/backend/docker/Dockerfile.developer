@@ -1,0 +1,7 @@
+# Developer container - implements code changes
+FROM auto-claude-base:latest
+
+# Developer-specific tools can be added here
+# Initially same as base
+
+LABEL container.role="developer"

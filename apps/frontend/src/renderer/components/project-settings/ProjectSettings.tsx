@@ -47,6 +47,8 @@ export function ProjectSettings({ project, open, onOpenChange }: ProjectSettings
     setShowOpenAIKey,
     showGitHubToken,
     setShowGitHubToken,
+    showDatabaseUrl,
+    setShowDatabaseUrl,
     expandedSections,
     toggleSection,
     gitHubConnectionStatus,

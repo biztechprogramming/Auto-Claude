@@ -78,6 +78,8 @@ class DockerOrchestrator:
     def build_images(self) -> None:
         """Build all required Docker images."""
         dockerfile_dir = Path(__file__).parent.parent.parent / "docker"
+        # Use apps/backend as build context so we can access prompts/
+        build_context = Path(__file__).parent.parent.parent
 
         # Build base image first
         base_dockerfile = dockerfile_dir / "Dockerfile.base"
@@ -88,7 +90,7 @@ class DockerOrchestrator:
                     "docker", "build",
                     "-f", str(base_dockerfile),
                     "-t", "auto-claude-base:latest",
-                    str(dockerfile_dir),
+                    str(build_context),
                 ],
                 check=True,
             )
@@ -103,7 +105,7 @@ class DockerOrchestrator:
                         "docker", "build",
                         "-f", str(dockerfile),
                         "-t", image,
-                        str(dockerfile_dir),
+                        str(build_context),
                     ],
                     check=True,
                 )
@@ -211,7 +213,7 @@ class DockerOrchestrator:
 
             cmd.extend([
                 container_name,
-                "python", "/scripts/developer_agent.py",
+                "python3", "/scripts/developer_agent.py",
             ])
         else:
             # Create new persistent container (no --rm)
@@ -242,8 +244,11 @@ class DockerOrchestrator:
             ])
 
             # Create container
+            # Prevent MSYS path conversion on Windows (Git Bash)
+            env = os.environ.copy()
+            env["MSYS_NO_PATHCONV"] = "1"
             await asyncio.to_thread(
-                subprocess.run, cmd, capture_output=True, text=True, check=True
+                subprocess.run, cmd, capture_output=True, text=True, check=True, env=env
             )
 
             # Now execute the agent script in the running container
@@ -252,12 +257,15 @@ class DockerOrchestrator:
                 cmd.extend(["-e", f"{key}={value}"])
             cmd.extend([
                 container_name,
-                "python", "/scripts/developer_agent.py",
+                "python3", "/scripts/developer_agent.py",
             ])
 
         # Run container or exec into existing container
+        # Prevent MSYS path conversion on Windows (Git Bash)
+        env = os.environ.copy()
+        env["MSYS_NO_PATHCONV"] = "1"
         result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True
+            subprocess.run, cmd, capture_output=True, text=True, env=env
         )
 
         # Parse output for commit SHA
@@ -310,11 +318,14 @@ class DockerOrchestrator:
 
         cmd.extend([
             self.images[ContainerRole.EVALUATOR],
-            "python", "/scripts/evaluator_agent.py",
+            "python3", "/scripts/evaluator_agent.py",
         ])
 
+        # Prevent MSYS path conversion on Windows (Git Bash)
+        env = os.environ.copy()
+        env["MSYS_NO_PATHCONV"] = "1"
         result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True
+            subprocess.run, cmd, capture_output=True, text=True, env=env
         )
 
         # Parse output for approval/rejection and comments
@@ -384,11 +395,14 @@ class DockerOrchestrator:
 
         cmd.extend([
             self.images[ContainerRole.QA],
-            "python", "/scripts/qa_agent.py",
+            "python3", "/scripts/qa_agent.py",
         ])
 
+        # Prevent MSYS path conversion on Windows (Git Bash)
+        env = os.environ.copy()
+        env["MSYS_NO_PATHCONV"] = "1"
         result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True
+            subprocess.run, cmd, capture_output=True, text=True, env=env
         )
 
         # Parse output for pass/fail and comments

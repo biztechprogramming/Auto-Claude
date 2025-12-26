@@ -20,6 +20,7 @@ Output:
     Exit code 0 on success, non-zero on failure
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -145,7 +146,7 @@ def load_prompt(prompt_name: str) -> str:
     return prompt_path.read_text()
 
 
-def run_implementation(
+async def run_implementation(
     repo_dir: Path,
     implementation_plan: dict,
     feedback_comments: list[dict] | None = None,
@@ -240,12 +241,34 @@ Please address all feedback comments before proceeding.
     logger.info("Starting agent session...")
     try:
         # Send initial message to trigger implementation
-        response = client.send_message(
+        message = (
             "Please implement the next pending subtask according to the implementation plan. "
             "Follow all steps in the coder prompt."
         )
 
-        logger.info(f"Agent session completed with {len(response)} responses")
+        logger.info("Sending query to Claude SDK...")
+        await client.query(message)
+
+        # Collect response
+        message_count = 0
+        async for msg in client.receive_response():
+            message_count += 1
+            msg_type = type(msg).__name__
+            logger.debug(f"Received message #{message_count}: {msg_type}")
+
+            # Handle AssistantMessage (text and tool use)
+            if msg_type == "AssistantMessage" and hasattr(msg, "content"):
+                for block in msg.content:
+                    block_type = type(block).__name__
+
+                    if block_type == "TextBlock" and hasattr(block, "text"):
+                        # Log agent text output
+                        logger.info(f"Agent: {block.text[:200]}")
+                    elif block_type == "ToolUseBlock" and hasattr(block, "name"):
+                        # Log tool usage
+                        logger.debug(f"Tool used: {block.name}")
+
+        logger.info(f"Agent session completed with {message_count} messages")
 
         # Get the latest commit SHA
         result = run_command(
@@ -333,13 +356,15 @@ def main() -> int:
             # Setup branch
             setup_branch(repo_dir, base_branch, branch_name)
 
-            # Run implementation
-            commit_sha = run_implementation(
-                repo_dir,
-                implementation_plan,
-                feedback_comments,
-                model,
-                max_turns,
+            # Run implementation (async)
+            commit_sha = asyncio.run(
+                run_implementation(
+                    repo_dir,
+                    implementation_plan,
+                    feedback_comments,
+                    model,
+                    max_turns,
+                )
             )
 
             # Push changes

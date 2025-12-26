@@ -1,6 +1,9 @@
 # Evaluator container - code quality review
 FROM auto-claude-base:latest
 
+# Copy agent scripts into container (frozen at build time)
+COPY docker/scripts/evaluator_agent.py /scripts/evaluator_agent.py
+
 # Evaluator-specific tools can be added here
 # Initially same as base, but configurable for different review approaches
 

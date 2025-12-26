@@ -1,6 +1,9 @@
 # Developer container - implements code changes
 FROM auto-claude-base:latest
 
+# Copy agent scripts into container (frozen at build time)
+COPY docker/scripts/developer_agent.py /scripts/developer_agent.py
+
 # Developer-specific tools can be added here
 # Initially same as base
 

@@ -34,6 +34,9 @@ RUN npm install -g \
     vitest \
     cypress
 
+# Copy agent scripts into container (frozen at build time)
+COPY docker/scripts/qa_agent.py /scripts/qa_agent.py
+
 USER node
 
 LABEL container.role="qa"

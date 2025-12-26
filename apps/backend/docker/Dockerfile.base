@@ -29,8 +29,12 @@ RUN pip3 install --break-system-packages claude-agent-sdk
 RUN curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz | tar xvz \
     && mv migrate /usr/local/bin/migrate
 
-# Create workspace
+# Create workspace and prompts directory
 RUN mkdir -p /workspace && chown node:node /workspace
+RUN mkdir -p /app/prompts
+
+# Copy all prompt files and directories into container
+COPY prompts/ /app/prompts/
 
 # Set up git defaults
 RUN git config --global user.email "auto-claude@local" && \

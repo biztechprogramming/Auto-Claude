@@ -98,10 +98,14 @@ class DockerIsolationStrategy(IsolationStrategy):
         # Feedback loop limit
         self.max_feedback_iterations = max_feedback_iterations
 
+        # Detect base branch if not provided
+        if not base_branch:
+            base_branch = self._detect_base_branch()
+
         # Orchestrator
         self._orchestrator = DockerOrchestrator(
             project_dir=project_dir,
-            base_branch=base_branch or self._detect_base_branch(),
+            base_branch=base_branch,
             repo_url=self.repo_url,
             images={
                 ContainerRole.DEVELOPER: self.image_developer,
@@ -126,8 +130,8 @@ class DockerIsolationStrategy(IsolationStrategy):
         raise RuntimeError("Could not detect repository URL. Set REPO_URL env var.")
 
     def _detect_base_branch(self) -> str:
-        """Detect the base branch (main/master)."""
-        for branch in ["main", "master"]:
+        """Detect the base branch (main/master/develop)."""
+        for branch in ["main", "master", "develop"]:
             result = subprocess.run(
                 ["git", "rev-parse", "--verify", branch],
                 cwd=self.project_dir,
@@ -135,14 +139,11 @@ class DockerIsolationStrategy(IsolationStrategy):
             )
             if result.returncode == 0:
                 return branch
-        # Fallback to current branch
-        result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=self.project_dir,
-            capture_output=True,
-            text=True,
+        # No fallback - fail if none of the standard branches exist
+        raise RuntimeError(
+            "Could not detect base branch. None of 'main', 'master', or 'develop' exist. "
+            "Create one of these branches or specify --base-branch explicitly."
         )
-        return result.stdout.strip() or "main"
 
     def is_docker_available(self) -> bool:
         """Check if Docker is available."""
@@ -177,7 +178,7 @@ class DockerIsolationStrategy(IsolationStrategy):
             capture_output=True,
         )
         subprocess.run(
-            ["git", "branch", branch_name, self.base_branch or "main"],
+            ["git", "branch", branch_name, self.base_branch],
             cwd=self.project_dir,
             capture_output=True,
             check=True,
@@ -231,6 +232,15 @@ class DockerIsolationStrategy(IsolationStrategy):
         4. QA container runs tests
         5. If failed, loop back to Developer with comments
         6. If all pass, notify human
+
+        Kanban statuses:
+        - "planning" → Planning implementation
+        - "coding" → Developer implementing changes
+        - "ai_review" → Evaluator reviewing code quality
+        - "ai_testing" → QA running tests
+        - "ready_for_review" → All checks passed, ready for human review
+        - "needs_revision" → Failed checks, needs fixes
+        - "failed" → Max iterations or critical error
         """
         env_info = self.get_or_create_environment(spec_name)
         branch_name = env_info.branch_name
@@ -238,14 +248,29 @@ class DockerIsolationStrategy(IsolationStrategy):
         accumulated_comments: list[FeedbackComment] = []
         iteration = 0
 
+        # Planning phase (if plan has subtasks, show them)
+        if on_status_change:
+            on_status_change(spec_name, "planning", "Creating implementation plan")
+
+            # Show subtasks if available
+            subtasks = plan.get("subtasks", [])
+            if subtasks:
+                subtask_summary = f"Plan: {len(subtasks)} subtasks"
+                on_status_change(spec_name, "planning", subtask_summary)
+
         while iteration < self.max_feedback_iterations:
             iteration += 1
 
-            # Update status
+            # CODING PHASE - Developer container
             if on_status_change:
-                on_status_change(spec_name, "in_progress", f"Iteration {iteration}")
+                if iteration == 1:
+                    on_status_change(spec_name, "coding", "Implementing features...")
+                else:
+                    on_status_change(
+                        spec_name, "coding",
+                        f"Addressing feedback (iteration {iteration}/{self.max_feedback_iterations})"
+                    )
 
-            # 1. Developer container
             dev_result = await self._orchestrator.run_developer(
                 spec_name=spec_name,
                 branch_name=branch_name,
@@ -257,11 +282,21 @@ class DockerIsolationStrategy(IsolationStrategy):
                 if on_status_change:
                     on_status_change(
                         spec_name, "failed",
-                        f"Developer container failed: {dev_result.output[:200]}"
+                        f"Developer failed: {dev_result.output}"
                     )
                 return False
 
-            # 2. Evaluator container
+            # Update with commit info
+            if on_status_change and dev_result.commit_sha:
+                on_status_change(
+                    spec_name, "coding",
+                    f"Completed - commit {dev_result.commit_sha[:7]}"
+                )
+
+            # AI REVIEW PHASE - Evaluator container
+            if on_status_change:
+                on_status_change(spec_name, "ai_review", "Reviewing code quality...")
+
             eval_result = await self._orchestrator.run_evaluator(
                 spec_name=spec_name,
                 branch_name=branch_name,
@@ -274,11 +309,17 @@ class DockerIsolationStrategy(IsolationStrategy):
                 if on_status_change:
                     on_status_change(
                         spec_name, "needs_revision",
-                        f"Evaluator rejected: {len(eval_result.comments)} comments"
+                        f"AI Review rejected: {len(eval_result.comments)} issues found"
                     )
                 continue  # Loop back to developer
 
-            # 3. QA container
+            if on_status_change:
+                on_status_change(spec_name, "ai_review", "✓ Code quality approved")
+
+            # AI TESTING PHASE - QA container
+            if on_status_change:
+                on_status_change(spec_name, "ai_testing", "Running automated tests...")
+
             qa_result = await self._orchestrator.run_qa(
                 spec_name=spec_name,
                 branch_name=branch_name,
@@ -291,20 +332,26 @@ class DockerIsolationStrategy(IsolationStrategy):
                 if on_status_change:
                     on_status_change(
                         spec_name, "needs_revision",
-                        f"QA failed: {len(qa_result.comments)} issues"
+                        f"AI Testing failed: {len(qa_result.comments)} test failures"
                     )
                 continue  # Loop back to developer
 
+            if on_status_change:
+                on_status_change(spec_name, "ai_testing", "✓ All tests passed")
+
             # All passed!
             if on_status_change:
-                on_status_change(spec_name, "ready_for_review", "All checks passed")
+                on_status_change(
+                    spec_name, "ready_for_review",
+                    f"All checks passed - ready for human review"
+                )
             return True
 
         # Max iterations reached
         if on_status_change:
             on_status_change(
                 spec_name, "failed",
-                f"Max iterations ({self.max_feedback_iterations}) reached"
+                f"Max iterations ({self.max_feedback_iterations}) reached - needs manual review"
             )
         return False
 

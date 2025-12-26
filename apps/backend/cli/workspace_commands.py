@@ -193,15 +193,48 @@ def handle_merge_command(
     Returns:
         True if merge succeeded, False otherwise
     """
-    success = merge_existing_build(
-        project_dir, spec_name, no_commit=no_commit, base_branch=base_branch
-    )
+    import os
 
-    # Generate commit message suggestion if staging succeeded (no_commit mode)
-    if success and no_commit:
-        _generate_and_save_commit_message(project_dir, spec_name)
+    # Check if Docker isolation mode is enabled
+    isolation_method = os.getenv("ISOLATION_METHOD", "worktree").lower()
 
-    return success
+    if isolation_method == "docker":
+        # Use Docker isolation strategy for merge
+        try:
+            from core.isolation.factory import IsolationFactory
+
+            strategy = IsolationFactory.create(
+                project_dir=project_dir,
+                base_branch=base_branch,
+                method="docker",
+            )
+
+            # Merge and cleanup containers
+            success = strategy.merge_changes(spec_name, delete_after=True)
+
+            if success:
+                print()
+                print("✅ Changes merged successfully!")
+                print("✅ Docker containers cleaned up automatically.")
+                print()
+
+            return success
+        except Exception as e:
+            print(f"Error during Docker merge: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    else:
+        # Use worktree mode
+        success = merge_existing_build(
+            project_dir, spec_name, no_commit=no_commit, base_branch=base_branch
+        )
+
+        # Generate commit message suggestion if staging succeeded (no_commit mode)
+        if success and no_commit:
+            _generate_and_save_commit_message(project_dir, spec_name)
+
+        return success
 
 
 def _generate_and_save_commit_message(project_dir: Path, spec_name: str) -> None:
@@ -293,7 +326,36 @@ def handle_discard_command(project_dir: Path, spec_name: str) -> None:
         project_dir: Project root directory
         spec_name: Name of the spec
     """
-    discard_existing_build(project_dir, spec_name)
+    import os
+
+    # Check if Docker isolation mode is enabled
+    isolation_method = os.getenv("ISOLATION_METHOD", "worktree").lower()
+
+    if isolation_method == "docker":
+        # Use Docker isolation strategy for discard
+        try:
+            from core.isolation.factory import IsolationFactory
+
+            strategy = IsolationFactory.create(
+                project_dir=project_dir,
+                method="docker",
+            )
+
+            # Remove environment and cleanup containers
+            strategy.remove_environment(spec_name, cleanup_branch=True)
+
+            print()
+            print("✅ Build discarded successfully!")
+            print("✅ Docker containers cleaned up automatically.")
+            print("✅ Branch deleted.")
+            print()
+        except Exception as e:
+            print(f"Error during Docker discard: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        # Use worktree mode
+        discard_existing_build(project_dir, spec_name)
 
 
 def handle_list_worktrees_command(project_dir: Path) -> None:

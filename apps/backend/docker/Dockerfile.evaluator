@@ -1,10 +1,17 @@
-# Evaluator container - code quality review
+# Evaluator container - reviews code quality via FastAPI
+# Inherits FastAPI support from base
 FROM auto-claude-base:latest
 
-# Copy agent scripts into container (frozen at build time)
-COPY docker/scripts/evaluator_agent.py /scripts/evaluator_agent.py
+# Copy evaluator-specific FastAPI server
+COPY docker/api/evaluator_server.py /api/evaluator_server.py
 
-# Evaluator-specific tools can be added here
-# Initially same as base, but configurable for different review approaches
+# Set working directory
+WORKDIR /api
+
+# Expose API port
+EXPOSE 8002
+
+# Run FastAPI server
+CMD ["python3", "evaluator_server.py"]
 
 LABEL container.role="evaluator"

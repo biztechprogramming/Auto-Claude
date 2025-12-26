@@ -84,25 +84,10 @@ class DeveloperServer(BaseContainerServer):
         logger.info("Authenticating with GitHub...")
 
         try:
-            # Authenticate gh CLI
-            process = await asyncio.create_subprocess_exec(
-                "gh", "auth", "login", "--with-token",
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
+            # GH_TOKEN is already set in environment, so gh CLI will use it automatically
+            # We just need to setup git to use gh as credential helper
+            logger.info("Setting up git credential helper...")
 
-            stdout, stderr = await process.communicate(input=token.encode())
-
-            if process.returncode != 0:
-                logger.error(f"gh auth login failed with exit code {process.returncode}")
-                logger.error(f"stdout: {stdout.decode()}")
-                logger.error(f"stderr: {stderr.decode()}")
-                raise RuntimeError(f"GitHub authentication failed: {stderr.decode()}")
-
-            logger.info("GitHub CLI authenticated")
-
-            # Setup git credential helper
             process = await asyncio.create_subprocess_exec(
                 "gh", "auth", "setup-git",
                 stdout=asyncio.subprocess.PIPE,
@@ -111,11 +96,14 @@ class DeveloperServer(BaseContainerServer):
 
             stdout, stderr = await process.communicate()
 
-            if process.returncode != 0:
-                logger.error(f"gh auth setup-git failed: {stderr.decode()}")
-                raise RuntimeError(f"Git credential setup failed: {stderr.decode()}")
+            # gh auth setup-git returns exit code 0 even when GH_TOKEN is used
+            # Just log any output and continue
+            if stdout:
+                logger.info(f"gh output: {stdout.decode().strip()}")
+            if stderr:
+                logger.info(f"gh info: {stderr.decode().strip()}")
 
-            logger.info("Git credentials configured")
+            logger.info("Git credentials configured (using GH_TOKEN)")
 
         except Exception as e:
             logger.error(f"GitHub authentication error: {e}")

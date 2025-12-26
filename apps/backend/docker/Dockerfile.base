@@ -33,6 +33,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Claude Agent SDK
 RUN pip3 install --break-system-packages claude-agent-sdk
 
+# Install FastAPI and dependencies for all containers
+RUN pip3 install --break-system-packages \
+    fastapi==0.115.0 \
+    uvicorn[standard]==0.32.0 \
+    pydantic==2.10.0 \
+    websockets==14.1
+
 # Install golang-migrate for database migrations
 RUN curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz | tar xvz \
     && mv migrate /usr/local/bin/migrate
@@ -44,10 +51,14 @@ RUN mkdir -p /app/prompts
 # Copy all prompt files and directories into container
 COPY prompts/ /app/prompts/
 
-# Set up git defaults
-RUN git config --global user.email "auto-claude@local" && \
-    git config --global user.name "Auto-Claude" && \
-    git config --global init.defaultBranch main
+# Copy FastAPI base server (inherited by all containers)
+RUN mkdir -p /api
+COPY docker/api/base_server.py /api/base_server.py
+
+# Set up git defaults for node user
+RUN su node -c 'git config --global user.email "auto-claude@local"' && \
+    su node -c 'git config --global user.name "Auto-Claude"' && \
+    su node -c 'git config --global init.defaultBranch main'
 
 WORKDIR /workspace
 

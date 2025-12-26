@@ -1,12 +1,8 @@
 # Developer container - implements code changes via FastAPI
+# Inherits FastAPI support from base
 FROM auto-claude-base:latest
 
-# Install FastAPI dependencies
-COPY docker/api/requirements.txt /api/requirements.txt
-RUN pip3 install --break-system-packages -r /api/requirements.txt
-
-# Copy FastAPI server code
-COPY docker/api/base_server.py /api/base_server.py
+# Copy developer-specific FastAPI server
 COPY docker/api/developer_server.py /api/developer_server.py
 
 # Set working directory

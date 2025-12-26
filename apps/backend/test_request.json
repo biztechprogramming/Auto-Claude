@@ -1,0 +1,7 @@
+{
+  "repo_url": "https://github.com/biztechprogramming/Auto-Claude.git",
+  "base_branch": "develop",
+  "branch_name": "auto-claude/test-fastapi-001",
+  "spec_name": "test-fastapi-001",
+  "task_description": "Test FastAPI container communication with GitHub push"
+}

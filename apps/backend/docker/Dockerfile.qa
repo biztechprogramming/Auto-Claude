@@ -1,9 +1,11 @@
-# QA container - functional testing with Playwright
+# QA container - runs automated tests via FastAPI
+# Inherits FastAPI support from base
 FROM auto-claude-base:latest
 
+# Switch to root to install packages
 USER root
 
-# Install Playwright dependencies
+# Install Playwright and testing tools (QA-specific)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libnss3 \
     libnspr4 \
@@ -28,15 +30,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN npm install -g playwright && \
     npx playwright install chromium firefox
 
-# Install additional testing tools
+# Install testing frameworks
 RUN npm install -g \
     jest \
     vitest \
     cypress
 
-# Copy agent scripts into container (frozen at build time)
-COPY docker/scripts/qa_agent.py /scripts/qa_agent.py
+# Copy QA-specific FastAPI server
+COPY docker/api/qa_server.py /api/qa_server.py
 
+# Switch back to node user
 USER node
+
+# Set working directory
+WORKDIR /api
+
+# Expose API port
+EXPOSE 8003
+
+# Run FastAPI server
+CMD ["python3", "qa_server.py"]
 
 LABEL container.role="qa"

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from .base import ContainerRole, ContainerResult, FeedbackComment
+from .container_client import ContainerClient, ContainerConfig as ClientConfig
 
 
 @dataclass
@@ -165,6 +166,105 @@ class DockerOrchestrator:
                     capture_output=True,
                 )
 
+    async def _run_container_http(
+        self,
+        role: ContainerRole,
+        spec_name: str,
+        branch_name: str,
+        task_description: str,
+        feedback_comments: Optional[str] = None,
+    ) -> ContainerResult:
+        """
+        Run a container via FastAPI HTTP communication.
+
+        This provides real-time log visibility and better error handling.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Port mapping for each role
+        port_map = {
+            ContainerRole.DEVELOPER: 8001,
+            ContainerRole.EVALUATOR: 8002,
+            ContainerRole.QA: 8003,
+        }
+        port = port_map[role]
+
+        # Create container config
+        container_name = self._get_container_name(spec_name, role)
+        env_vars = self._get_base_env_vars()
+
+        config = ClientConfig(
+            name=container_name,
+            image=self.images[role],
+            port=port,
+            env_vars=env_vars
+        )
+
+        # Create client
+        client = ContainerClient(config)
+
+        try:
+            # Start container
+            logger.info(f"Starting {role.value} container...")
+            client.start_container()
+
+            # Wait for API to be ready
+            if not client.wait_for_ready(timeout=30):
+                raise RuntimeError(f"{role.value} container API did not become ready")
+
+            # Prepare task data
+            task_data = {
+                "repo_url": self.repo_url,
+                "base_branch": self.base_branch,
+                "branch_name": branch_name,
+                "spec_name": spec_name,
+                "task_description": task_description,
+                "feedback_comments": feedback_comments,
+            }
+
+            # Start task
+            logger.info(f"Starting {role.value} task...")
+            await client.start_task(task_data)
+
+            # TODO: Stream logs in real-time (for now, just poll status)
+            logger.info(f"Waiting for {role.value} to complete...")
+            final_status = await client.wait_for_completion(timeout=600)  # 10 minute timeout
+
+            # Get final logs
+            logs = await client.get_logs(count=1000)
+            output = "\n".join([f"[{log['level']}] {log['message']}" for log in logs])
+
+            return ContainerResult(
+                role=role,
+                success=True,
+                exit_code=0,
+                output=output,
+                commit_sha=None,  # TODO: Extract from logs if needed
+            )
+
+        except Exception as e:
+            logger.error(f"{role.value} container failed: {e}")
+
+            # Try to get logs even on failure
+            try:
+                logs = await client.get_logs(count=1000)
+                output = "\n".join([f"[{log['level']}] {log['message']}" for log in logs])
+            except:
+                output = str(e)
+
+            return ContainerResult(
+                role=role,
+                success=False,
+                exit_code=1,
+                output=output,
+                commit_sha=None,
+            )
+
+        finally:
+            # Keep container running for review (don't stop it)
+            pass
+
     async def run_developer(
         self,
         spec_name: str,
@@ -173,30 +273,23 @@ class DockerOrchestrator:
         feedback_comments: list[FeedbackComment],
     ) -> ContainerResult:
         """
-        Run the developer container.
+        Run the developer container via FastAPI HTTP communication.
 
-        Uses a persistent container that's reused across iterations for speed.
-        First run: Creates container, clones repo, sets up environment
-        Subsequent runs: Reuses container, just pulls latest and runs agent
+        Uses FastAPI server running in container for:
+        - Real-time log visibility
+        - Better error handling
+        - Structured communication
 
-        1. Clone repo with depth=1 (first run only)
-        2. Create/checkout feature branch
-        3. Implement the plan (addressing any feedback)
-        4. Commit and push changes
+        1. Start FastAPI container
+        2. POST task to /start endpoint
+        3. Monitor /status for progress
+        4. Stream /logs for real-time visibility
+        5. Return results when complete
         """
-        container_name = self._get_container_name(spec_name, ContainerRole.DEVELOPER)
-
-        env_vars = self._get_base_env_vars()
-        env_vars.update({
-            "SPEC_NAME": spec_name,
-            "BRANCH_NAME": branch_name,
-            "BASE_BRANCH": self.base_branch,
-            "IMPLEMENTATION_PLAN": json.dumps(plan),
-        })
-
-        # Include feedback if any
+        # Format feedback comments as JSON string for the container
+        feedback_str = None
         if feedback_comments:
-            env_vars["FEEDBACK_COMMENTS"] = json.dumps([
+            feedback_str = json.dumps([
                 {
                     "source": c.source.value,
                     "message": c.message,
@@ -207,85 +300,13 @@ class DockerOrchestrator:
                 for c in feedback_comments
             ])
 
-        # Check if developer container already exists and is running
-        if self._is_container_running(container_name):
-            # Reuse existing container with docker exec
-            cmd = ["docker", "exec"]
-
-            # Add environment variables
-            for key, value in env_vars.items():
-                cmd.extend(["-e", f"{key}={value}"])
-
-            cmd.extend([
-                container_name,
-                "python3", "/scripts/developer_agent.py",
-            ])
-        else:
-            # Create new persistent container (no --rm)
-            # Stop and remove if it exists but isn't running
-            if self._container_exists(container_name):
-                subprocess.run(
-                    ["docker", "rm", "-f", container_name],
-                    capture_output=True,
-                )
-
-            # Create persistent container that stays running
-            cmd = [
-                "docker", "run",
-                "-d",  # Detached mode
-                "--name", container_name,
-                "--memory", self.memory_limit,
-                "--cpu-shares", self.cpu_shares,
-                "--pids-limit", "256",
-            ]
-
-            # Add environment variables
-            for key, value in env_vars.items():
-                cmd.extend(["-e", f"{key}={value}"])
-
-            cmd.extend([
-                self.images[ContainerRole.DEVELOPER],
-                "tail", "-f", "/dev/null",  # Keep container running
-            ])
-
-            # Create container
-            # Prevent MSYS path conversion on Windows (Git Bash)
-            env = os.environ.copy()
-            env["MSYS_NO_PATHCONV"] = "1"
-            await asyncio.to_thread(
-                subprocess.run, cmd, capture_output=True, text=True, check=True, env=env
-            )
-
-            # Now execute the agent script in the running container
-            cmd = ["docker", "exec"]
-            for key, value in env_vars.items():
-                cmd.extend(["-e", f"{key}={value}"])
-            cmd.extend([
-                container_name,
-                "python3", "/scripts/developer_agent.py",
-            ])
-
-        # Run container or exec into existing container
-        # Prevent MSYS path conversion on Windows (Git Bash)
-        env = os.environ.copy()
-        env["MSYS_NO_PATHCONV"] = "1"
-        result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True, env=env
-        )
-
-        # Parse output for commit SHA
-        commit_sha = None
-        for line in result.stdout.split("\n"):
-            if line.startswith("COMMIT_SHA="):
-                commit_sha = line.split("=", 1)[1].strip()
-                break
-
-        return ContainerResult(
+        # Use HTTP-based container communication
+        return await self._run_container_http(
             role=ContainerRole.DEVELOPER,
-            success=result.returncode == 0,
-            exit_code=result.returncode,
-            output=result.stdout + result.stderr,
-            commit_sha=commit_sha,
+            spec_name=spec_name,
+            branch_name=branch_name,
+            task_description=f"Implement plan: {json.dumps(plan)}",
+            feedback_comments=feedback_str,
         )
 
     async def run_evaluator(

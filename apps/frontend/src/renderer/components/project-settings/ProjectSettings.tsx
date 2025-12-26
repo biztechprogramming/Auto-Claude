@@ -47,6 +47,8 @@ export function ProjectSettings({ project, open, onOpenChange }: ProjectSettings
     setShowOpenAIKey,
     showGitHubToken,
     setShowGitHubToken,
+    showDatabaseUrl,
+    setShowDatabaseUrl,
     expandedSections,
     toggleSection,
     gitHubConnectionStatus,
@@ -108,6 +110,8 @@ export function ProjectSettings({ project, open, onOpenChange }: ProjectSettings
                   setShowClaudeToken={setShowClaudeToken}
                   expanded={expandedSections.claude}
                   onToggle={() => toggleSection('claude')}
+                  advancedExpanded={expandedSections.advancedConfig}
+                  onAdvancedToggle={() => toggleSection('advancedConfig')}
                 />
 
                 <Separator />

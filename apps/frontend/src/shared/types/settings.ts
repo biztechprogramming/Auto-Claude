@@ -4,6 +4,7 @@
 
 import type { NotificationSettings } from './project';
 import type { ChangelogFormat, ChangelogAudience, ChangelogEmojiLevel } from './changelog';
+import type { SupportedLanguage } from '../constants/i18n';
 
 // Color theme types for multi-theme support
 export type ColorTheme = 'default' | 'dusk' | 'lime' | 'ocean' | 'retro' | 'neo' | 'forest';
@@ -50,6 +51,8 @@ export interface FeatureModelConfig {
   insights: ModelTypeShort;    // Insights chat feature
   ideation: ModelTypeShort;    // Ideation generation
   roadmap: ModelTypeShort;     // Roadmap generation
+  githubIssues: ModelTypeShort; // GitHub Issues automation
+  githubPrs: ModelTypeShort;    // GitHub PR review automation
 }
 
 // Feature-specific thinking level configuration
@@ -57,6 +60,8 @@ export interface FeatureThinkingConfig {
   insights: ThinkingLevel;
   ideation: ThinkingLevel;
   roadmap: ThinkingLevel;
+  githubIssues: ThinkingLevel;
+  githubPrs: ThinkingLevel;
 }
 
 // Agent profile for preset model/thinking configurations
@@ -113,6 +118,8 @@ export interface AppSettings {
   betaUpdates?: boolean;
   // Migration flags (internal use)
   _migratedAgentProfileToAuto?: boolean;
+  // Language preference for UI (i18n)
+  language?: SupportedLanguage;
 }
 
 // Auto-Claude Source Environment Configuration (for auto-claude repo .env)

@@ -10,6 +10,8 @@ Provides:
 
 import asyncio
 import logging
+import os
+import shutil
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -47,6 +49,12 @@ class StartRequest(BaseModel):
     spec_name: str
     task_description: str
     feedback_comments: Optional[str] = None
+
+
+class CloneRequest(BaseModel):
+    """Request to clone repository."""
+    repo_url: str
+    branch_name: str
 
 
 class StatusResponse(BaseModel):
@@ -172,6 +180,42 @@ class BaseContainerServer:
             entries = self.logs.get_recent(count)
             return {"logs": [e.dict() for e in entries]}
 
+        @self.app.post("/clone")
+        async def clone_repository(request: CloneRequest):
+            """Clone repository and checkout branch."""
+            try:
+                logger.info(f"Cloning repository: {request.repo_url}")
+                logger.info(f"Branch: {request.branch_name}")
+
+                # Get GitHub token
+                gh_token = os.environ.get("GH_TOKEN")
+                if not gh_token:
+                    raise ValueError("GH_TOKEN environment variable not set")
+
+                # Clean and setup workspace
+                repo_dir = Path("/workspace")
+                if repo_dir.exists():
+                    logger.info("Cleaning existing workspace...")
+                    shutil.rmtree(repo_dir)
+                repo_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Using workspace: {repo_dir}")
+
+                # Authenticate GitHub
+                await self._authenticate_github(gh_token)
+
+                # Clone repository
+                await self._clone_repository(request.repo_url, repo_dir)
+
+                # Checkout branch
+                await self._checkout_branch(repo_dir, request.branch_name)
+
+                logger.info(f"✓ Repository cloned successfully to /workspace")
+                return {"status": "success", "workspace": str(repo_dir)}
+
+            except Exception as e:
+                logger.error(f"Clone failed: {e}", exc_info=True)
+                return {"status": "error", "error": str(e)}
+
         @self.app.websocket("/logs/stream")
         async def stream_logs(websocket: WebSocket):
             """Stream logs in real-time via WebSocket."""
@@ -197,6 +241,175 @@ class BaseContainerServer:
     async def _run_task(self, request: StartRequest):
         """Override this method in subclasses to implement task logic."""
         raise NotImplementedError("Subclass must implement _run_task")
+
+    # ===== Git Operations (Common to All Containers) =====
+
+    async def _setup_workspace(self, request: StartRequest, branch_name: str) -> Path:
+        """
+        Setup workspace: clean, clone repo, checkout branch.
+
+        Args:
+            request: The start request with repo info
+            branch_name: The branch to checkout (can be different per container)
+
+        Returns:
+            Path to the workspace directory
+        """
+        repo_dir = Path("/workspace")
+
+        # Clean workspace
+        if repo_dir.exists():
+            logger.info("Cleaning existing workspace...")
+            shutil.rmtree(repo_dir)
+        repo_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Using workspace: {repo_dir}")
+
+        # Authenticate GitHub
+        gh_token = os.environ.get("GH_TOKEN")
+        if not gh_token:
+            raise ValueError("GH_TOKEN environment variable not set")
+        await self._authenticate_github(gh_token)
+
+        # Clone repository
+        await self._clone_repository(request.repo_url, repo_dir)
+
+        # Checkout branch
+        await self._checkout_branch(repo_dir, branch_name)
+
+        return repo_dir
+
+    async def _authenticate_github(self, token: str):
+        """Authenticate GitHub CLI."""
+        logger.info("Authenticating with GitHub...")
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                "gh", "auth", "setup-git",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+
+            stdout, stderr = await process.communicate()
+
+            if stdout:
+                logger.info(f"gh output: {stdout.decode().strip()}")
+            if stderr:
+                logger.info(f"gh info: {stderr.decode().strip()}")
+
+            logger.info("Git credentials configured (using GH_TOKEN)")
+
+        except Exception as e:
+            logger.error(f"GitHub authentication error: {e}")
+            raise
+
+    async def _clone_repository(self, repo_url: str, repo_dir: Path):
+        """Clone the repository."""
+        logger.info(f"Cloning repository: {repo_url}")
+
+        process = await asyncio.create_subprocess_exec(
+            "git", "clone", repo_url, str(repo_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            logger.error(f"Clone failed: {stderr.decode()}")
+            raise RuntimeError(f"Repository clone failed: {stderr.decode()}")
+
+        logger.info("Repository cloned successfully")
+
+    async def _checkout_branch(self, repo_dir: Path, branch_name: str):
+        """
+        Checkout a branch (create if doesn't exist).
+
+        For developer: creates new feature branch
+        For evaluator/QA: checks out existing feature branch
+        """
+        logger.info(f"Checking out branch: {branch_name}")
+
+        # Try to checkout existing branch first
+        process = await asyncio.create_subprocess_exec(
+            "git", "checkout", branch_name,
+            cwd=str(repo_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+
+        if process.returncode == 0:
+            logger.info(f"Checked out existing branch: {branch_name}")
+            return
+
+        # Branch doesn't exist, create it
+        logger.info(f"Branch doesn't exist, creating: {branch_name}")
+        process = await asyncio.create_subprocess_exec(
+            "git", "checkout", "-b", branch_name,
+            cwd=str(repo_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            logger.error(f"Branch creation failed: {stderr.decode()}")
+            raise RuntimeError(f"Branch creation failed: {stderr.decode()}")
+
+        logger.info(f"Branch {branch_name} created and checked out")
+
+    async def _commit_changes(self, repo_dir: Path, message: str):
+        """Commit changes."""
+        logger.info("Committing changes...")
+
+        # Add all changes
+        process = await asyncio.create_subprocess_exec(
+            "git", "add", ".",
+            cwd=str(repo_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await process.communicate()
+
+        # Commit
+        process = await asyncio.create_subprocess_exec(
+            "git", "commit", "-m", message,
+            cwd=str(repo_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            # Check if there are no changes to commit
+            if "nothing to commit" in stderr.decode():
+                logger.info("No changes to commit")
+                return
+            logger.error(f"Commit failed: {stderr.decode()}")
+            raise RuntimeError(f"Commit failed: {stderr.decode()}")
+
+        logger.info("Changes committed")
+
+    async def _push_changes(self, repo_dir: Path, branch_name: str):
+        """Push changes to remote."""
+        logger.info(f"Pushing to remote branch: {branch_name}")
+
+        process = await asyncio.create_subprocess_exec(
+            "git", "push", "-u", "origin", branch_name,
+            cwd=str(repo_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        stdout, stderr = await process.communicate()
+
+        if process.returncode != 0:
+            logger.error(f"Push failed: {stderr.decode()}")
+            raise RuntimeError(f"Push failed: {stderr.decode()}")
+
+        logger.info("Changes pushed to GitHub successfully!")
 
     def run(self):
         """Start the FastAPI server."""

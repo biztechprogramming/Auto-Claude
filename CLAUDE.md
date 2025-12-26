@@ -244,6 +244,11 @@ DOCKER_IMAGE_DEVELOPER=auto-claude-dev:latest
 DOCKER_IMAGE_EVALUATOR=auto-claude-eval:latest
 DOCKER_IMAGE_QA=auto-claude-qa:latest
 
+# Build behavior (controls whether images rebuild on every run)
+# Set to 'false' for faster startup (only builds if images don't exist)
+# Set to 'true' to always rebuild (useful when developing container code)
+DOCKER_ALWAYS_REBUILD=false
+
 # Resource limits
 DOCKER_MEMORY_LIMIT=4g
 DOCKER_CPU_SHARES=1024
@@ -262,12 +267,15 @@ MAX_FEEDBACK_ITERATIONS=3
 
 **Building Docker images:**
 ```bash
-# Build all images
-cd apps/backend/docker
-docker build -f Dockerfile.base -t auto-claude-base:latest .
-docker build -f Dockerfile.developer -t auto-claude-dev:latest .
-docker build -f Dockerfile.evaluator -t auto-claude-eval:latest .
-docker build -f Dockerfile.qa -t auto-claude-qa:latest .
+# Rebuild all containers (recommended when you change Dockerfiles or server code)
+npm run rebuild:containers
+
+# Or manually build each image:
+cd apps/backend
+docker build -f docker/Dockerfile.base -t auto-claude-base:latest .
+docker build -f docker/Dockerfile.developer -t auto-claude-dev:latest .
+docker build -f docker/Dockerfile.evaluator -t auto-claude-eval:latest .
+docker build -f docker/Dockerfile.qa -t auto-claude-qa:latest .
 ```
 
 **See also:**

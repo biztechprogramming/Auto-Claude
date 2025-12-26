@@ -5,6 +5,7 @@ Runs on port 8002 and handles code review/evaluation tasks.
 """
 
 import logging
+from pathlib import Path
 from datetime import datetime
 
 from base_server import BaseContainerServer, StartRequest, TaskStatus, create_start_endpoint
@@ -26,9 +27,15 @@ class EvaluatorServer(BaseContainerServer):
             logger.info("EVALUATOR AGENT STARTING")
             logger.info("=" * 70)
 
-            # TODO: Implement actual code review logic
+            # Workspace should already be setup by orchestrator via /clone endpoint
+            repo_dir = Path("/workspace")
+
+            if not repo_dir.exists() or not (repo_dir / ".git").exists():
+                raise RuntimeError("Workspace not initialized. Orchestrator must call /clone first.")
+
+            # TODO: Implement actual code review logic using Claude SDK
             logger.info(f"Reviewing code for: {request.spec_name}")
-            logger.info(f"Branch: {request.branch_name}")
+            logger.info(f"Workspace: {repo_dir}")
 
             # Placeholder: Mark as success for now
             logger.info("Code review completed successfully")

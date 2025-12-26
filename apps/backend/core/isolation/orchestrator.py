@@ -81,40 +81,67 @@ class DockerOrchestrator:
 
         return env
 
-    def build_images(self) -> None:
-        """Build all required Docker images."""
+    def _image_exists(self, image_name: str) -> bool:
+        """Check if a Docker image exists."""
+        result = subprocess.run(
+            ["docker", "images", "-q", image_name],
+            capture_output=True,
+            text=True,
+        )
+        return bool(result.stdout.strip())
+
+    def build_images(self, force: bool = False) -> None:
+        """
+        Build all required Docker images.
+
+        Args:
+            force: If True, always rebuild. If False, only build if images don't exist
+                   or if DOCKER_ALWAYS_REBUILD=true in .env
+        """
+        # Check configuration
+        always_rebuild = os.environ.get("DOCKER_ALWAYS_REBUILD", "false").lower() == "true"
+        should_build = force or always_rebuild
+
         dockerfile_dir = Path(__file__).parent.parent.parent / "docker"
         # Use apps/backend as build context so we can access prompts/
         build_context = Path(__file__).parent.parent.parent
 
         # Build base image first
+        base_image = "auto-claude-base:latest"
         base_dockerfile = dockerfile_dir / "Dockerfile.base"
+
         if base_dockerfile.exists():
-            print("Building base image...")
-            subprocess.run(
-                [
-                    "docker", "build",
-                    "-f", str(base_dockerfile),
-                    "-t", "auto-claude-base:latest",
-                    str(build_context),
-                ],
-                check=True,
-            )
+            if should_build or not self._image_exists(base_image):
+                print(f"Building base image... (force={force}, always_rebuild={always_rebuild})")
+                subprocess.run(
+                    [
+                        "docker", "build",
+                        "-f", str(base_dockerfile),
+                        "-t", base_image,
+                        str(build_context),
+                    ],
+                    check=True,
+                )
+            else:
+                print(f"Base image exists, skipping build (set DOCKER_ALWAYS_REBUILD=true to force)")
 
         # Build role-specific images
         for role, image in self.images.items():
             dockerfile = dockerfile_dir / f"Dockerfile.{role.value}"
             if dockerfile.exists():
-                print(f"Building {role.value} image...")
-                subprocess.run(
-                    [
-                        "docker", "build",
-                        "-f", str(dockerfile),
-                        "-t", image,
-                        str(build_context),
-                    ],
-                    check=True,
-                )
+                if should_build or not self._image_exists(image):
+                    print(f"Building {role.value} image... (force={force}, always_rebuild={always_rebuild})")
+                    subprocess.run(
+                        [
+                            "docker", "build",
+                            "-f", str(dockerfile),
+                            "-t", image,
+                            str(build_context),
+                        ],
+                        check=True,
+                    )
+                else:
+                    print(f"{role.value} image exists, skipping build")
 
     def _is_container_running(self, container_name: str) -> bool:
         """Check if a container is running."""

@@ -5,6 +5,7 @@ Runs on port 8003 and handles automated testing/QA tasks.
 """
 
 import logging
+from pathlib import Path
 from datetime import datetime
 
 from base_server import BaseContainerServer, StartRequest, TaskStatus, create_start_endpoint
@@ -26,9 +27,15 @@ class QAServer(BaseContainerServer):
             logger.info("QA AGENT STARTING")
             logger.info("=" * 70)
 
-            # TODO: Implement actual QA/testing logic
+            # Workspace should already be setup by orchestrator via /clone endpoint
+            repo_dir = Path("/workspace")
+
+            if not repo_dir.exists() or not (repo_dir / ".git").exists():
+                raise RuntimeError("Workspace not initialized. Orchestrator must call /clone first.")
+
+            # TODO: Implement actual QA/testing logic using Claude SDK + Playwright
             logger.info(f"Running tests for: {request.spec_name}")
-            logger.info(f"Branch: {request.branch_name}")
+            logger.info(f"Workspace: {repo_dir}")
 
             # Placeholder: Mark as success for now
             logger.info("All tests passed successfully")

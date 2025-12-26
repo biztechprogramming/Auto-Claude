@@ -175,8 +175,10 @@ export interface TaskMetadata {
   linearIssueId?: string;  // Reference to Linear issue if from Linear
   linearIdentifier?: string;  // Linear issue identifier (e.g., 'ABC-123')
   linearUrl?: string;  // Linear issue URL
-  githubIssueNumber?: number;  // Reference to GitHub issue number if from GitHub
+  githubIssueNumber?: number;  // Reference to GitHub issue number if from GitHub (single issue)
+  githubIssueNumbers?: number[];  // Reference to multiple GitHub issues if from a batch
   githubUrl?: string;  // GitHub issue URL
+  githubBatchTheme?: string;  // Theme/title of the GitHub issue batch
 
   // Classification
   category?: TaskCategory;
@@ -329,6 +331,13 @@ export interface MergeConflict {
   type?: ConflictType; // 'semantic' = parallel task conflict, 'git' = branch divergence
 }
 
+// Path-mapped file that needs AI merge due to rename
+export interface PathMappedAIMerge {
+  oldPath: string;
+  newPath: string;
+  reason: string;
+}
+
 // Git-level conflict information (branch divergence)
 export interface GitConflictInfo {
   hasConflicts: boolean;
@@ -337,6 +346,10 @@ export interface GitConflictInfo {
   commitsBehind: number;
   baseBranch: string;
   specBranch: string;
+  // Files that need AI merge due to path mappings (file renames)
+  pathMappedAIMerges?: PathMappedAIMerge[];
+  // Total number of file renames detected
+  totalRenames?: number;
 }
 
 // Summary statistics from merge preview/execution
@@ -348,6 +361,8 @@ export interface MergeStats {
   aiResolved?: number;
   humanRequired?: number;
   hasGitConflicts?: boolean; // True if there are git-level conflicts requiring rebase
+  // Count of files needing AI merge due to path mappings (file renames)
+  pathMappedAIMergeCount?: number;
 }
 
 export interface WorktreeMergeResult {

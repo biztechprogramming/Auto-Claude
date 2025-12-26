@@ -16,8 +16,7 @@ from pathlib import Path
 # Add apps/backend to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from core.isolation.orchestrator import DockerOrchestrator
-from core.isolation.base import ContainerRole
+from core.isolation.docker.image_builder import ImageBuilder
 
 
 def main():
@@ -33,21 +32,12 @@ def main():
     print("  - QA container (auto-claude-qa:latest)")
     print()
 
-    # Create orchestrator with minimal config (just for building images)
-    orchestrator = DockerOrchestrator(
-        project_dir=Path.cwd(),
-        base_branch="main",
-        repo_url="",  # Not needed for building
-        images={
-            ContainerRole.DEVELOPER: "auto-claude-dev:latest",
-            ContainerRole.EVALUATOR: "auto-claude-eval:latest",
-            ContainerRole.QA: "auto-claude-qa:latest",
-        },
-    )
+    # Create image builder (no unnecessary parameters!)
+    builder = ImageBuilder()
 
     # Force rebuild all images
     try:
-        orchestrator.build_images(force=True)
+        builder.build_all_images(force=True)
         print()
         print("=" * 70)
         print("REBUILD COMPLETE!")

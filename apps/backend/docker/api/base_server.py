@@ -195,9 +195,15 @@ class BaseContainerServer:
                 # Clean and setup workspace
                 repo_dir = Path("/workspace")
                 if repo_dir.exists():
-                    logger.info("Cleaning existing workspace...")
-                    shutil.rmtree(repo_dir)
-                repo_dir.mkdir(parents=True, exist_ok=True)
+                    logger.info("Cleaning existing workspace contents...")
+                    # Don't delete /workspace itself, just clean its contents
+                    for item in repo_dir.iterdir():
+                        if item.is_dir():
+                            shutil.rmtree(item)
+                        else:
+                            item.unlink()
+                else:
+                    repo_dir.mkdir(parents=True, exist_ok=True)
                 logger.info(f"Using workspace: {repo_dir}")
 
                 # Authenticate GitHub

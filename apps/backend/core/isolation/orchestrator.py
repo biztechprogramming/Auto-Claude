@@ -7,25 +7,16 @@ Runs on the host, outside of Docker containers.
 
 import asyncio
 import json
+import logging
 import os
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 from .base import ContainerRole, ContainerResult, FeedbackComment
 from .container_client import ContainerClient, ContainerConfig as ClientConfig
-
-
-@dataclass
-class ContainerConfig:
-    """Configuration for running a container."""
-    image: str
-    name: str
-    role: ContainerRole
-    env_vars: dict
-    memory_limit: str
-    cpu_shares: str
+from .docker.image_builder import ImageBuilder
+from .docker.container_manager import ContainerLifecycleManager
 
 
 class DockerOrchestrator:
@@ -58,9 +49,16 @@ class DockerOrchestrator:
         self.cpu_shares = cpu_shares
         self.database_url = database_url
 
+        # Compose with specialized components
+        self.image_builder = ImageBuilder()
+        self.container_manager = ContainerLifecycleManager(
+            memory_limit=memory_limit,
+            cpu_shares=cpu_shares,
+        )
+
     def _get_container_name(self, spec_name: str, role: ContainerRole) -> str:
-        """Generate container name for a spec and role."""
-        return f"auto-claude-{spec_name}-{role.value}"
+        """Generate container name for a spec and role (delegates to container manager)."""
+        return self.container_manager.get_container_name(spec_name, role)
 
     def _get_base_env_vars(self) -> dict:
         """Get base environment variables for all containers."""
@@ -81,117 +79,28 @@ class DockerOrchestrator:
 
         return env
 
-    def _image_exists(self, image_name: str) -> bool:
-        """Check if a Docker image exists."""
-        result = subprocess.run(
-            ["docker", "images", "-q", image_name],
-            capture_output=True,
-            text=True,
-        )
-        return bool(result.stdout.strip())
-
     def build_images(self, force: bool = False) -> None:
         """
-        Build all required Docker images.
+        Build all required Docker images (delegates to image builder).
 
         Args:
             force: If True, always rebuild. If False, only build if images don't exist
                    or if DOCKER_ALWAYS_REBUILD=true in .env
         """
-        # Check configuration
-        always_rebuild = os.environ.get("DOCKER_ALWAYS_REBUILD", "false").lower() == "true"
-        should_build = force or always_rebuild
-
-        dockerfile_dir = Path(__file__).parent.parent.parent / "docker"
-        # Use apps/backend as build context so we can access prompts/
-        build_context = Path(__file__).parent.parent.parent
-
-        # Build base image first
-        base_image = "auto-claude-base:latest"
-        base_dockerfile = dockerfile_dir / "Dockerfile.base"
-
-        if base_dockerfile.exists():
-            if should_build or not self._image_exists(base_image):
-                print(f"Building base image... (force={force}, always_rebuild={always_rebuild})")
-                subprocess.run(
-                    [
-                        "docker", "build",
-                        "-f", str(base_dockerfile),
-                        "-t", base_image,
-                        str(build_context),
-                    ],
-                    check=True,
-                )
-            else:
-                print(f"Base image exists, skipping build (set DOCKER_ALWAYS_REBUILD=true to force)")
-
-        # Build role-specific images
-        for role, image in self.images.items():
-            dockerfile = dockerfile_dir / f"Dockerfile.{role.value}"
-            if dockerfile.exists():
-                if should_build or not self._image_exists(image):
-                    print(f"Building {role.value} image... (force={force}, always_rebuild={always_rebuild})")
-                    subprocess.run(
-                        [
-                            "docker", "build",
-                            "-f", str(dockerfile),
-                            "-t", image,
-                            str(build_context),
-                        ],
-                        check=True,
-                    )
-                else:
-                    print(f"{role.value} image exists, skipping build")
-
-    def _is_container_running(self, container_name: str) -> bool:
-        """Check if a container is running."""
-        result = subprocess.run(
-            ["docker", "ps", "-q", "-f", f"name={container_name}"],
-            capture_output=True,
-            text=True,
-        )
-        return bool(result.stdout.strip())
-
-    def _container_exists(self, container_name: str) -> bool:
-        """Check if a container exists (running or stopped)."""
-        result = subprocess.run(
-            ["docker", "ps", "-a", "-q", "-f", f"name={container_name}"],
-            capture_output=True,
-            text=True,
-        )
-        return bool(result.stdout.strip())
+        self.image_builder.build_all_images(images=self.images, force=force)
 
     def get_container_status(self, spec_name: str) -> dict[ContainerRole, str]:
         """
-        Get status of all containers for a spec.
+        Get status of all containers for a spec (delegates to container manager).
 
         Returns:
             Dict mapping role to status: "running", "stopped", "not_found"
         """
-        status = {}
-        for role in ContainerRole:
-            container_name = self._get_container_name(spec_name, role)
-            if self._is_container_running(container_name):
-                status[role] = "running"
-            elif self._container_exists(container_name):
-                status[role] = "stopped"
-            else:
-                status[role] = "not_found"
-        return status
+        return self.container_manager.get_container_status(spec_name)
 
     def cleanup_containers(self, spec_name: str) -> None:
-        """Stop and remove all containers for a spec."""
-        for role in ContainerRole:
-            container_name = self._get_container_name(spec_name, role)
-            if self._container_exists(container_name):
-                subprocess.run(
-                    ["docker", "stop", container_name],
-                    capture_output=True,
-                )
-                subprocess.run(
-                    ["docker", "rm", container_name],
-                    capture_output=True,
-                )
+        """Stop and remove all containers for a spec (delegates to container manager)."""
+        self.container_manager.cleanup_containers(spec_name)
 
     async def _run_container_http(
         self,

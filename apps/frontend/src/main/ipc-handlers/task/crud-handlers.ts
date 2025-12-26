@@ -427,4 +427,63 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
       }
     }
   );
+
+  /**
+   * Update spec.md content
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.TASK_UPDATE_SPEC_MARKDOWN,
+    async (
+      _,
+      taskId: string,
+      content: string
+    ): Promise<IPCResult<Task>> => {
+      try {
+        // Validate input
+        if (!taskId || !content?.trim()) {
+          return { success: false, error: 'Task ID and content are required' };
+        }
+
+        // Find task and project
+        const { task, project } = findTaskAndProject(taskId);
+
+        if (!task || !project) {
+          return { success: false, error: 'Task not found' };
+        }
+
+        const autoBuildDir = project.autoBuildPath || '.auto-claude';
+        const specDir = path.join(project.path, autoBuildDir, 'specs', task.specId);
+        const specFilePath = path.join(specDir, AUTO_BUILD_PATHS.SPEC_FILE);
+
+        if (!existsSync(specDir)) {
+          return { success: false, error: 'Spec directory not found' };
+        }
+
+        // Write content to spec.md
+        try {
+          writeFileSync(specFilePath, content, 'utf-8');
+        } catch (err) {
+          return {
+            success: false,
+            error: err instanceof Error ? err.message : 'Failed to write spec.md'
+          };
+        }
+
+        // Reload task from project store to get updated data
+        const tasks = projectStore.getTasks(project.id);
+        const updatedTask = tasks.find(t => t.id === taskId);
+
+        if (!updatedTask) {
+          return { success: false, error: 'Failed to reload updated task' };
+        }
+
+        return { success: true, data: updatedTask };
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Unknown error'
+        };
+      }
+    }
+  );
 }

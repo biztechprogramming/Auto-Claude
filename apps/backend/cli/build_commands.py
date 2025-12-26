@@ -49,6 +49,12 @@ from .input_handlers import (
     read_multiline_input,
 )
 
+# Docker isolation adapter
+from core.isolation_adapter import (
+    should_use_docker_isolation,
+    get_isolation_strategy,
+)
+
 
 def handle_build_command(
     project_dir: Path,
@@ -181,25 +187,82 @@ def handle_build_command(
                 # User chose to start fresh or merged existing
                 pass
 
-    # Check isolation method from environment
-    isolation_method = os.getenv("ISOLATION_METHOD", "worktree").lower()
+    # ============================================================================
+    # DOCKER ISOLATION MODE
+    # ============================================================================
+    # If ISOLATION_METHOD=docker in .env, use Docker containers instead of worktrees
+    if should_use_docker_isolation():
+        print(f"\n{icon(Icons.DOCKER)} Docker Isolation Mode")
+        print("=" * 70)
+        print("Using Docker containers for isolated build execution.")
+        print("  • Developer container: Implements code")
+        print("  • Evaluator container: Reviews quality")
+        print("  • QA container: Runs tests")
+        print("=" * 70)
+        print()
 
-    # Docker isolation mode - use IsolationFactory
-    if isolation_method == "docker":
-        debug("run.py", "Using Docker isolation mode")
-        _handle_docker_build(
-            project_dir=project_dir,
-            spec_dir=spec_dir,
-            model=model,
-            base_branch=base_branch,
-            auto_continue=auto_continue,
-            skip_qa=skip_qa,
-        )
-        return
+        # Get Docker isolation strategy
+        try:
+            isolation = get_isolation_strategy(project_dir, base_branch)
+        except Exception as e:
+            print(f"\n{icon(Icons.ERROR)} Failed to initialize Docker isolation: {e}")
+            print("\nTip: Ensure Docker is running and REPO_URL is set.")
+            print("Falling back to worktree mode...")
+            print()
+            # Fall through to worktree mode
+        else:
+            # Load implementation plan
+            from agent import load_implementation_plan
 
-    # Worktree isolation mode (default) - use existing logic
-    debug("run.py", "Using Worktree isolation mode")
+            try:
+                plan = load_implementation_plan(spec_dir)
+            except FileNotFoundError:
+                print(f"\n{icon(Icons.ERROR)} Implementation plan not found: {spec_dir}/implementation_plan.json")
+                print("Run spec creation first to generate the plan.")
+                sys.exit(1)
 
+            # Setup Docker images (builds if needed)
+            print("Setting up Docker environment...")
+            isolation.setup()
+            print(f"{icon(Icons.SUCCESS)} Docker images ready\n")
+
+            # Run Docker pipeline
+            try:
+                success = asyncio.run(
+                    isolation.run_pipeline(
+                        spec_name=spec_dir.name,
+                        plan=plan,
+                    )
+                )
+
+                if success:
+                    print("\n" + "=" * 70)
+                    print(f"  {icon(Icons.SUCCESS)} DOCKER PIPELINE COMPLETED")
+                    print("=" * 70)
+                    print("\nAll containers completed successfully.")
+                    print("Changes have been pushed to the remote repository.")
+                    print(f"\nBranch: auto-claude/{spec_dir.name}")
+                    print()
+                else:
+                    print("\n" + "=" * 70)
+                    print(f"  {icon(Icons.ERROR)} DOCKER PIPELINE FAILED")
+                    print("=" * 70)
+                    print("\nOne or more containers failed.")
+                    print(f"Check container logs for details.")
+                    print()
+                    sys.exit(1)
+
+            except KeyboardInterrupt:
+                print("\n\nDocker pipeline interrupted.")
+                print(f"Resume: python auto-claude/run.py --spec {spec_dir.name}")
+                sys.exit(130)
+
+            # Docker mode complete - skip worktree workflow
+            return
+
+    # ============================================================================
+    # WORKTREE ISOLATION MODE (Default)
+    # ============================================================================
     # Choose workspace (skip for parallel mode - it always uses worktrees)
     working_dir = project_dir
     worktree_manager = None

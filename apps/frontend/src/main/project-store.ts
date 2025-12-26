@@ -339,16 +339,13 @@ export class ProjectStore {
 
         // Try to read spec file for description
         let description = '';
+        let specMarkdown = '';
         if (existsSync(specFilePath)) {
           try {
             const content = readFileSync(specFilePath, 'utf-8');
-            // Extract full Overview section until next heading or end of file
-            // Use \n#{1,6}\s to match valid markdown headings (# to ######) with required space
-            // This avoids truncating at # in code blocks (e.g., Python comments)
-            const overviewMatch = content.match(/## Overview\s*\n+([\s\S]*?)(?=\n#{1,6}\s|$)/);
-            if (overviewMatch) {
-              description = overviewMatch[1].trim();
-            }
+            // Load full spec.md content for both description and specMarkdown
+            description = content;
+            specMarkdown = content;
           } catch {
             // Ignore read errors
           }
@@ -452,6 +449,7 @@ export class ProjectStore {
           projectId,
           title,
           description,
+          specMarkdown, // Full spec.md content for editing
           status,
           reviewReason,
           subtasks,

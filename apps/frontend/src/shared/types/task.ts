@@ -236,6 +236,7 @@ export interface Task {
   projectId: string;
   title: string;
   description: string;
+  specMarkdown?: string;  // Full spec.md content for editing
   status: TaskStatus;
   reviewReason?: ReviewReason;  // Why task needs human review (only set when status is 'human_review')
   subtasks: Subtask[];

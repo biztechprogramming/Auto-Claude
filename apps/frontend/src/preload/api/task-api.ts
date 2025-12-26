@@ -26,6 +26,10 @@ export interface TaskAPI {
     taskId: string,
     updates: { title?: string; description?: string }
   ) => Promise<IPCResult<Task>>;
+  updateSpecMarkdown: (
+    taskId: string,
+    content: string
+  ) => Promise<IPCResult<Task>>;
   startTask: (taskId: string, options?: TaskStartOptions) => void;
   stopTask: (taskId: string) => void;
   submitReview: (
@@ -91,6 +95,12 @@ export const createTaskAPI = (): TaskAPI => ({
     updates: { title?: string; description?: string }
   ): Promise<IPCResult<Task>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_UPDATE, taskId, updates),
+
+  updateSpecMarkdown: (
+    taskId: string,
+    content: string
+  ): Promise<IPCResult<Task>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_UPDATE_SPEC_MARKDOWN, taskId, content),
 
   startTask: (taskId: string, options?: TaskStartOptions): void =>
     ipcRenderer.send(IPC_CHANNELS.TASK_START, taskId, options),

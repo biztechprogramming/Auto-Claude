@@ -1,4 +1,4 @@
-import { X, Pencil, AlertTriangle } from 'lucide-react';
+import { X, Pencil, AlertTriangle, FileText } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
@@ -14,6 +14,7 @@ interface TaskHeaderProps {
   isRunning: boolean;
   onClose: () => void;
   onEdit: () => void;
+  onEditSpec: () => void;
 }
 
 export function TaskHeader({
@@ -23,7 +24,8 @@ export function TaskHeader({
   taskProgress,
   isRunning,
   onClose,
-  onEdit
+  onEdit,
+  onEditSpec
 }: TaskHeaderProps) {
   return (
     <div className="flex items-start justify-between p-4 pb-3">
@@ -98,6 +100,24 @@ export function TaskHeader({
           </TooltipTrigger>
           <TooltipContent side="bottom">
             {isRunning && !isStuck ? 'Cannot edit while task is running' : 'Edit task'}
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="hover:bg-primary/10 hover:text-primary transition-colors"
+                onClick={onEditSpec}
+                disabled={isRunning && !isStuck}
+              >
+                <FileText className="h-4 w-4" />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {isRunning && !isStuck ? 'Cannot edit while task is running' : 'Edit spec.md'}
           </TooltipContent>
         </Tooltip>
         <Button variant="ghost" size="icon" className="hover:bg-destructive/10 hover:text-destructive transition-colors" onClick={onClose}>

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Separator } from '../ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { ScrollArea } from '../ui/scroll-area';
@@ -5,6 +6,7 @@ import { TooltipProvider } from '../ui/tooltip';
 import { calculateProgress } from '../../lib/utils';
 import { startTask, stopTask, submitReview, recoverStuckTask, deleteTask } from '../../stores/task-store';
 import { TaskEditDialog } from '../TaskEditDialog';
+import { SpecEditDialog } from '../SpecEditDialog';
 import { useTaskDetail } from './hooks/useTaskDetail';
 import { TaskHeader } from './TaskHeader';
 import { TaskProgress } from './TaskProgress';
@@ -24,6 +26,7 @@ interface TaskDetailPanelProps {
 export function TaskDetailPanel({ task, onClose }: TaskDetailPanelProps) {
   const state = useTaskDetail({ task });
   const _progress = calculateProgress(task.subtasks);
+  const [isSpecEditDialogOpen, setIsSpecEditDialogOpen] = useState(false);
 
   // Event Handlers
   const handleStartStop = () => {
@@ -115,6 +118,13 @@ export function TaskDetailPanel({ task, onClose }: TaskDetailPanelProps) {
     state.setIsDiscarding(false);
   };
 
+  const handleSaveSpec = async (content: string) => {
+    const result = await window.electronAPI.updateSpecMarkdown(task.id, content);
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to save spec.md');
+    }
+  };
+
   return (
     <TooltipProvider delayDuration={300}>
       <div className="flex h-full w-96 flex-col bg-card border-l border-border">
@@ -127,6 +137,7 @@ export function TaskDetailPanel({ task, onClose }: TaskDetailPanelProps) {
           isRunning={state.isRunning}
           onClose={onClose}
           onEdit={() => state.setIsEditDialogOpen(true)}
+          onEditSpec={() => setIsSpecEditDialogOpen(true)}
         />
 
         <Separator />
@@ -260,6 +271,14 @@ export function TaskDetailPanel({ task, onClose }: TaskDetailPanelProps) {
           task={task}
           open={state.isEditDialogOpen}
           onOpenChange={state.setIsEditDialogOpen}
+        />
+
+        {/* Edit Spec Dialog */}
+        <SpecEditDialog
+          task={task}
+          isOpen={isSpecEditDialogOpen}
+          onClose={() => setIsSpecEditDialogOpen(false)}
+          onSave={handleSaveSpec}
         />
       </div>
     </TooltipProvider>

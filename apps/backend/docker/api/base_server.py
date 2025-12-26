@@ -43,11 +43,8 @@ class TaskStatus(str, Enum):
 
 class StartRequest(BaseModel):
     """Request to start a task."""
-    repo_url: str
-    base_branch: str = "main"
-    branch_name: str
-    spec_name: str
     task_description: str
+    branch_name: str
     feedback_comments: Optional[str] = None
 
 
@@ -438,7 +435,6 @@ def create_start_endpoint(server: BaseContainerServer):
             raise HTTPException(status_code=409, detail="Task already running")
 
         logger.info(f"Starting task: {request.task_description}")
-        logger.info(f"Repo: {request.repo_url}")
         logger.info(f"Branch: {request.branch_name}")
 
         server.status = TaskStatus.RUNNING

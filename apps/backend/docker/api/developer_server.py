@@ -27,27 +27,38 @@ class DeveloperServer(BaseContainerServer):
             logger.info("DEVELOPER AGENT STARTING")
             logger.info("=" * 70)
 
-            # Workspace should already be setup by orchestrator via /clone endpoint
+            # Workspace should already be setup via /clone endpoint
             repo_dir = Path("/workspace")
 
             if not repo_dir.exists() or not (repo_dir / ".git").exists():
-                raise RuntimeError("Workspace not initialized. Orchestrator must call /clone first.")
+                raise RuntimeError("Workspace not initialized. Call /clone first.")
 
-            # Run implementation (TODO: integrate with Claude SDK)
-            logger.info("Starting implementation...")
             logger.info(f"Task: {request.task_description}")
             logger.info(f"Working directory: {repo_dir}")
 
-            # For now, create a test file
-            test_file = repo_dir / "hello.txt"
-            test_file.write_text("Hello from FastAPI-based Docker container!\n")
-            logger.info("Created hello.txt")
+            # Create and checkout the feature branch
+            logger.info(f"Creating branch: {request.branch_name}")
+            await self._checkout_branch(repo_dir, request.branch_name)
+
+            # TODO: Integrate with Claude SDK to actually execute the task
+            # For now, just demonstrate file modification
+            logger.info("Executing task (placeholder implementation)...")
+
+            # Example: Modify README.md
+            readme = repo_dir / "README.md"
+            if readme.exists():
+                content = readme.read_text()
+                content += f"\n\n## Container Test\nModified by containerized agent: {request.task_description}\n"
+                readme.write_text(content)
+                logger.info("Modified README.md")
 
             # Commit changes
             await self._commit_changes(repo_dir, f"Implement: {request.task_description}")
+            logger.info("Changes committed locally")
 
-            # Push to remote
+            # Push the new branch to remote
             await self._push_changes(repo_dir, request.branch_name)
+            logger.info(f"Changes pushed to {request.branch_name}")
 
             logger.info("=" * 70)
             logger.info("DEVELOPER AGENT COMPLETED SUCCESSFULLY")

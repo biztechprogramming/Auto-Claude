@@ -68,6 +68,11 @@ class DockerOrchestrator:
             "REPO_URL": self.repo_url,
         }
 
+        # GitHub authentication (gh CLI expects GH_TOKEN)
+        github_token = os.environ.get("GITHUB_TOKEN", "")
+        if github_token:
+            env["GH_TOKEN"] = github_token
+
         # Read-only database access
         if self.database_url:
             env["DATABASE_URL"] = self.database_url

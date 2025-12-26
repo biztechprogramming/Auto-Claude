@@ -239,6 +239,8 @@ Please address all feedback comments before proceeding.
 
     # Run the agent
     logger.info("Starting agent session...")
+    print(">>> AGENT SESSION STARTING <<<", flush=True)
+
     try:
         # Send initial message to trigger implementation
         message = (
@@ -246,42 +248,55 @@ Please address all feedback comments before proceeding.
             "Follow all steps in the coder prompt."
         )
 
-        logger.info("Sending query to Claude SDK...")
-        await client.query(message)
+        logger.info("Connecting to Claude SDK...")
+        print(">>> Connecting to Claude SDK...", flush=True)
 
-        # Collect response
-        message_count = 0
-        async for msg in client.receive_response():
-            message_count += 1
-            msg_type = type(msg).__name__
-            logger.debug(f"Received message #{message_count}: {msg_type}")
+        async with client:
+            logger.info("Connected! Sending query to Claude SDK...")
+            print(">>> Connected! Sending query...", flush=True)
+            await client.query(message)
 
-            # Handle AssistantMessage (text and tool use)
-            if msg_type == "AssistantMessage" and hasattr(msg, "content"):
-                for block in msg.content:
-                    block_type = type(block).__name__
+            # Collect response
+            message_count = 0
+            print(">>> Receiving responses...", flush=True)
+            async for msg in client.receive_response():
+                message_count += 1
+                msg_type = type(msg).__name__
+                logger.debug(f"Received message #{message_count}: {msg_type}")
 
-                    if block_type == "TextBlock" and hasattr(block, "text"):
-                        # Log agent text output
-                        logger.info(f"Agent: {block.text[:200]}")
-                    elif block_type == "ToolUseBlock" and hasattr(block, "name"):
-                        # Log tool usage
-                        logger.debug(f"Tool used: {block.name}")
+                # Handle AssistantMessage (text and tool use)
+                if msg_type == "AssistantMessage" and hasattr(msg, "content"):
+                    for block in msg.content:
+                        block_type = type(block).__name__
 
-        logger.info(f"Agent session completed with {message_count} messages")
+                        if block_type == "TextBlock" and hasattr(block, "text"):
+                            # Log agent text output
+                            text_preview = block.text[:200] if len(block.text) > 200 else block.text
+                            logger.info(f"Agent: {text_preview}")
+                            print(f">>> Agent response: {text_preview}", flush=True)
+                        elif block_type == "ToolUseBlock" and hasattr(block, "name"):
+                            # Log tool usage
+                            logger.info(f"Tool used: {block.name}")
+                            print(f">>> Tool: {block.name}", flush=True)
+
+            logger.info(f"Agent session completed with {message_count} messages")
+            print(f">>> Session complete! {message_count} messages received", flush=True)
 
         # Get the latest commit SHA
+        print(">>> Getting commit SHA...", flush=True)
         result = run_command(
             ["git", "rev-parse", "HEAD"],
             cwd=repo_dir,
         )
         commit_sha = result.stdout.strip()
         logger.info(f"Implementation complete. Commit SHA: {commit_sha}")
+        print(f">>> COMMIT SHA: {commit_sha}", flush=True)
 
         return commit_sha
 
     except Exception as e:
         logger.error(f"Agent session failed: {e}", exc_info=True)
+        print(f">>> ERROR: {e}", flush=True)
         raise
 
 
@@ -350,6 +365,11 @@ def main() -> int:
         repo_dir = Path(temp_dir) / "repo"
 
         try:
+            # Configure gh CLI to use git authentication
+            # gh reads GH_TOKEN from environment and sets up git credential helper
+            print(">>> Configuring GitHub authentication...", flush=True)
+            run_command(["gh", "auth", "setup-git"])
+
             # Clone repository
             clone_repository(repo_url, repo_dir)
 

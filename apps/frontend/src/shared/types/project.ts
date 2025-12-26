@@ -291,6 +291,13 @@ export interface ProjectEnvConfig {
 
   // Git/Worktree Settings
   defaultBranch?: string; // Base branch for worktree creation (e.g., 'main', 'develop')
+  repoUrl?: string; // Repository URL override (e.g., 'https://github.com/user/repo.git')
+
+  // Database Configuration
+  databaseUrl?: string; // PostgreSQL connection string for containerized environments
+
+  // Agent Configuration
+  maxFeedbackIterations?: number; // Maximum feedback iterations for agent (default: 3)
 
   // Graphiti Memory Integration (V2 - Multi-provider support)
   // Uses LadybugDB embedded database (no Docker required, Python 3.12+)

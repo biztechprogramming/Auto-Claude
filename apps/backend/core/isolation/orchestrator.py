@@ -69,7 +69,7 @@ class DockerOrchestrator:
         }
 
         # GitHub authentication (gh CLI expects GH_TOKEN)
-        github_token = os.environ.get("GITHUB_TOKEN", "")
+        github_token = os.environ.get("GH_TOKEN", "")
         if github_token:
             env["GH_TOKEN"] = github_token
 

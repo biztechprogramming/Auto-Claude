@@ -366,8 +366,29 @@ def main() -> int:
 
         try:
             # Configure gh CLI to use git authentication
-            # gh reads GH_TOKEN from environment and sets up git credential helper
+            # First authenticate gh with the GH_TOKEN from environment
             print(">>> Configuring GitHub authentication...", flush=True)
+            gh_token = os.environ.get("GH_TOKEN")
+            if not gh_token:
+                raise ValueError("GH_TOKEN environment variable not set")
+
+            # Authenticate gh CLI with the token
+            try:
+                auth_process = subprocess.run(
+                    ["gh", "auth", "login", "--with-token"],
+                    input=gh_token,
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                logger.info("gh CLI authenticated successfully")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"gh auth login failed with exit code {e.returncode}")
+                logger.error(f"stdout: {e.stdout}")
+                logger.error(f"stderr: {e.stderr}")
+                raise
+
+            # Setup git credential helper
             run_command(["gh", "auth", "setup-git"])
 
             # Clone repository

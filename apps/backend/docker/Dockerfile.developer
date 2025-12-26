@@ -1,10 +1,21 @@
-# Developer container - implements code changes
+# Developer container - implements code changes via FastAPI
 FROM auto-claude-base:latest
 
-# Copy agent scripts into container (frozen at build time)
-COPY docker/scripts/developer_agent.py /scripts/developer_agent.py
+# Install FastAPI dependencies
+COPY docker/api/requirements.txt /api/requirements.txt
+RUN pip3 install --break-system-packages -r /api/requirements.txt
 
-# Developer-specific tools can be added here
-# Initially same as base
+# Copy FastAPI server code
+COPY docker/api/base_server.py /api/base_server.py
+COPY docker/api/developer_server.py /api/developer_server.py
+
+# Set working directory
+WORKDIR /api
+
+# Expose API port
+EXPOSE 8001
+
+# Run FastAPI server
+CMD ["python3", "developer_server.py"]
 
 LABEL container.role="developer"

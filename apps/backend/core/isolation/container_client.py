@@ -81,20 +81,53 @@ class ContainerClient:
 
     def wait_for_ready(self, timeout: int = 30) -> bool:
         """Wait for container API to be ready."""
-        logger.info(f"Waiting for {self.config.name} API to be ready...")
+        logger.info(f"Waiting for {self.config.name} API to be ready at {self.base_url}/health...")
 
         start_time = time.time()
+        attempt = 0
         while time.time() - start_time < timeout:
+            attempt += 1
             try:
-                response = httpx.get(f"{self.base_url}/health", timeout=2.0)
+                logger.debug(f"Health check attempt {attempt} to {self.base_url}/health")
+                # Increase timeout and add retries for flaky connections
+                response = httpx.get(
+                    f"{self.base_url}/health",
+                    timeout=httpx.Timeout(10.0, connect=5.0),  # 10s total, 5s connect
+                    follow_redirects=True
+                )
+                logger.debug(f"Health check response: status={response.status_code}")
                 if response.status_code == 200:
                     logger.info(f"{self.config.name} API is ready!")
                     return True
-            except (httpx.ConnectError, httpx.ReadTimeout):
-                time.sleep(1)
+            except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
+                logger.debug(f"Health check attempt {attempt} failed: {type(e).__name__}: {e}")
+                time.sleep(2)  # Wait longer between retries
+            except Exception as e:
+                logger.error(f"Unexpected error during health check: {type(e).__name__}: {e}")
+                time.sleep(2)
 
-        logger.error(f"{self.config.name} API did not become ready within {timeout}s")
+        logger.error(f"{self.config.name} API did not become ready within {timeout}s after {attempt} attempts")
         return False
+
+    async def clone_repository(self, repo_url: str, branch_name: str) -> dict:
+        """Clone repository and checkout branch in the container."""
+        logger.info(f"Cloning repository in {self.config.name}: {repo_url}")
+
+        clone_data = {
+            "repo_url": repo_url,
+            "branch_name": branch_name,
+        }
+
+        async with httpx.AsyncClient(timeout=120.0) as client:  # Longer timeout for cloning
+            response = await client.post(
+                f"{self.base_url}/clone",
+                json=clone_data
+            )
+
+            if response.status_code != 200:
+                raise RuntimeError(f"Failed to clone repository: {response.text}")
+
+            return response.json()
 
     async def start_task(self, task_data: dict) -> dict:
         """Start a task on the container."""
@@ -159,8 +192,10 @@ class ContainerClient:
 
         while True:
             status = await self.get_status()
+            logger.debug(f"Container status: {status}")
 
             if status["status"] in ["success", "failed"]:
+                logger.info(f"Container completed with status: {status['status']}")
                 if status["status"] == "failed":
                     error_msg = status.get("error", "Unknown error")
                     raise RuntimeError(f"Task failed: {error_msg}")

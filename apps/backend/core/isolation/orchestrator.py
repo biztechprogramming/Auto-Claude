@@ -79,6 +79,37 @@ class DockerOrchestrator:
 
         return env
 
+    def _extract_task_description(self, plan: dict, spec_name: str) -> str:
+        """
+        Extract a concise, human-readable task description from the implementation plan.
+
+        Args:
+            plan: The implementation plan dict
+            spec_name: The spec name for fallback
+
+        Returns:
+            A clean, single-line task description suitable for commit messages
+        """
+        # Try to get feature name or spec name
+        feature = plan.get("feature", spec_name)
+
+        # Get first subtask description if available
+        phases = plan.get("phases", [])
+        if phases and len(phases) > 0:
+            first_phase = phases[0]
+            subtasks = first_phase.get("subtasks", [])
+            if subtasks and len(subtasks) > 0:
+                first_subtask = subtasks[0]
+                description = first_subtask.get("description", "")
+                if description:
+                    # Limit to first sentence or 100 chars
+                    if ". " in description:
+                        description = description.split(". ")[0]
+                    return description[:100]
+
+        # Fallback to feature name
+        return f"Implement {feature}"
+
     def build_images(self, force: bool = False) -> None:
         """
         Build all required Docker images (delegates to image builder).
@@ -140,14 +171,64 @@ class DockerOrchestrator:
         # Create client
         client = ContainerClient(config)
 
+        # Setup task log writer (Observer pattern)
+        from core.task_log_writer import TaskLogWriter
+        spec_dir = self.project_dir / ".auto-claude" / "specs" / spec_name
+        spec_dir.mkdir(parents=True, exist_ok=True)
+
+        log_writer = TaskLogWriter(spec_dir)
+
+        # Map role to phase
+        phase_map = {
+            ContainerRole.DEVELOPER: "coding",
+            ContainerRole.EVALUATOR: "coding",  # Review is part of coding
+            ContainerRole.QA: "validation",
+        }
+        phase = phase_map[role]
+
+        # Set phase to active
+        log_writer.set_phase_status(phase, "active")
+
+        log_stream_process = None
         try:
             # Start container
             logger.info(f"Starting {role.value} container...")
-            client.start_container()
+            container_id = client.start_container()
+
+            # Start streaming logs and observing them
+            try:
+                log_stream_process = subprocess.Popen(
+                    ["docker", "logs", "-f", container_id],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1  # Line buffered
+                )
+                logger.info(f"Started log streaming (PID: {log_stream_process.pid})")
+
+                # Start background thread to observe logs
+                import threading
+                def observe_logs():
+                    try:
+                        for line in log_stream_process.stdout:
+                            log_writer.observe_container_log(phase, line.rstrip())
+                    except Exception as e:
+                        logger.warning(f"Log observation error: {e}")
+
+                log_thread = threading.Thread(target=observe_logs, daemon=True)
+                log_thread.start()
+
+            except Exception as e:
+                logger.warning(f"Failed to start log streaming: {e}")
 
             # Wait for API to be ready
             if not client.wait_for_ready(timeout=30):
                 raise RuntimeError(f"{role.value} container API did not become ready")
+
+            # Clone repository first
+            logger.info(f"Cloning repository in {role.value} container...")
+            await client.clone_repository(self.repo_url, branch_name)
+            logger.info(f"Repository cloned successfully")
 
             # Prepare task data
             task_data = {
@@ -171,6 +252,9 @@ class DockerOrchestrator:
             logs = await client.get_logs(count=1000)
             output = "\n".join([f"[{log['level']}] {log['message']}" for log in logs])
 
+            # Mark phase as complete
+            log_writer.mark_phase_complete(phase, success=True)
+
             return ContainerResult(
                 role=role,
                 success=True,
@@ -181,6 +265,9 @@ class DockerOrchestrator:
 
         except Exception as e:
             logger.error(f"{role.value} container failed: {e}")
+
+            # Mark phase as failed
+            log_writer.mark_phase_complete(phase, success=False)
 
             # Try to get logs even on failure
             try:
@@ -198,6 +285,19 @@ class DockerOrchestrator:
             )
 
         finally:
+            # Stop log streaming process
+            if log_stream_process:
+                try:
+                    log_stream_process.terminate()
+                    log_stream_process.wait(timeout=5)
+                    logger.info("Log streaming stopped")
+                except Exception as e:
+                    logger.warning(f"Error stopping log stream: {e}")
+                    try:
+                        log_stream_process.kill()
+                    except:
+                        pass
+
             # Keep container running for review (don't stop it)
             pass
 
@@ -236,12 +336,15 @@ class DockerOrchestrator:
                 for c in feedback_comments
             ])
 
+        # Extract a concise task description from plan
+        task_description = self._extract_task_description(plan, spec_name)
+
         # Use HTTP-based container communication
         return await self._run_container_http(
             role=ContainerRole.DEVELOPER,
             spec_name=spec_name,
             branch_name=branch_name,
-            task_description=f"Implement plan: {json.dumps(plan)}",
+            task_description=task_description,
             feedback_comments=feedback_str,
         )
 

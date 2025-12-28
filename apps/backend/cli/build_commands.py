@@ -212,19 +212,51 @@ def handle_build_command(
             # Fall through to worktree mode
         else:
             # Load implementation plan
-            from agent import load_implementation_plan
+            from implementation_plan import ImplementationPlan
 
-            try:
-                plan = load_implementation_plan(spec_dir)
-            except FileNotFoundError:
-                print(f"\n{icon(Icons.ERROR)} Implementation plan not found: {spec_dir}/implementation_plan.json")
+            plan_path = spec_dir / "implementation_plan.json"
+            if not plan_path.exists():
+                print(f"\n{icon(Icons.ERROR)} Implementation plan not found: {plan_path}")
                 print("Run spec creation first to generate the plan.")
                 sys.exit(1)
+
+            # Load and update plan status
+            plan_obj = ImplementationPlan.load(plan_path)
+
+            # If plan is in human_review/review state (waiting for approval), start it
+            if plan_obj.status == "human_review" and plan_obj.planStatus == "review":
+                print(f"{icon(Icons.INFO)} Starting implementation (plan approved)")
+                plan_obj.status = "in_progress"
+                plan_obj.planStatus = "in_progress"
+                plan_obj.save(plan_path)
+
+            # Convert to dict for Docker orchestrator
+            plan = plan_obj.to_dict()
 
             # Setup Docker images (builds if needed)
             print("Setting up Docker environment...")
             isolation.setup()
             print(f"{icon(Icons.SUCCESS)} Docker images ready\n")
+
+            # Status callback for updates
+            status_manager = StatusManager(project_dir)
+
+            def on_status_change(spec_name: str, status: str, message: str = ""):
+                """Handle status updates from Docker pipeline."""
+                print(f"\n[{spec_name}] {status}: {message}")
+
+                # Update status manager
+                status_map = {
+                    "planning": BuildState.PLANNING,
+                    "coding": BuildState.BUILDING,
+                    "ai_review": BuildState.BUILDING,
+                    "ai_testing": BuildState.QA,
+                    "needs_revision": BuildState.BUILDING,
+                    "ready_for_review": BuildState.COMPLETE,
+                    "failed": BuildState.ERROR,
+                }
+                build_state = status_map.get(status, BuildState.BUILDING)
+                status_manager.update(state=build_state)
 
             # Run Docker pipeline
             try:
@@ -232,6 +264,7 @@ def handle_build_command(
                     isolation.run_pipeline(
                         spec_name=spec_dir.name,
                         plan=plan,
+                        on_status_change=on_status_change,
                     )
                 )
 

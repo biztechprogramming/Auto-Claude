@@ -91,9 +91,11 @@ class DockerIsolationStrategy(IsolationStrategy):
 
         # Repository URL for cloning
         self.repo_url = repo_url or os.getenv("REPO_URL") or self._detect_repo_url()
+        print(f"[DockerStrategy] repo_url={self.repo_url}, type={type(self.repo_url)}")
 
         # Database (read-only)
         self.database_url = database_url or os.getenv("DATABASE_URL")
+        print(f"[DockerStrategy] database_url={self.database_url}, type={type(self.database_url)}")
 
         # Feedback loop limit
         self.max_feedback_iterations = max_feedback_iterations
@@ -101,6 +103,16 @@ class DockerIsolationStrategy(IsolationStrategy):
         # Detect base branch if not provided
         if not base_branch:
             base_branch = self._detect_base_branch()
+        print(f"[DockerStrategy] base_branch={base_branch}, type={type(base_branch)}")
+
+        # Log all values before creating orchestrator
+        print(f"[DockerStrategy] Creating orchestrator with:")
+        print(f"  project_dir={self.project_dir}")
+        print(f"  base_branch={base_branch}")
+        print(f"  repo_url={self.repo_url}")
+        print(f"  memory_limit={self.memory_limit}")
+        print(f"  cpu_shares={self.cpu_shares}")
+        print(f"  database_url={self.database_url}")
 
         # Orchestrator
         self._orchestrator = DockerOrchestrator(
@@ -130,19 +142,21 @@ class DockerIsolationStrategy(IsolationStrategy):
         raise RuntimeError("Could not detect repository URL. Set REPO_URL env var.")
 
     def _detect_base_branch(self) -> str:
-        """Detect the base branch (main/master/develop)."""
-        for branch in ["main", "master", "develop"]:
-            result = subprocess.run(
-                ["git", "rev-parse", "--verify", branch],
-                cwd=self.project_dir,
-                capture_output=True,
-            )
-            if result.returncode == 0:
+        """Get the current branch."""
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=self.project_dir,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            branch = result.stdout.strip()
+            if branch and branch != "HEAD":
                 return branch
-        # No fallback - fail if none of the standard branches exist
+        # Fallback if detached HEAD or error
         raise RuntimeError(
-            "Could not detect base branch. None of 'main', 'master', or 'develop' exist. "
-            "Create one of these branches or specify --base-branch explicitly."
+            "Could not detect current branch. "
+            "Ensure you're on a branch or specify --base-branch explicitly."
         )
 
     def is_docker_available(self) -> bool:

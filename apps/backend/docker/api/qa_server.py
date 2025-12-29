@@ -48,7 +48,9 @@ class QAServer(BaseContainerServer):
             self.completed_at = datetime.now()
 
         except Exception as e:
-            logger.error(f"QA task failed: {e}", exc_info=True)
+            import traceback
+            error_details = f"{str(e)}\n{traceback.format_exc()}"
+            logger.error(f"QA task failed: {error_details}")
             self.error = str(e)
             self.status = TaskStatus.FAILED
             self.completed_at = datetime.now()

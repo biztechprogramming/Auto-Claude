@@ -43,6 +43,7 @@ class TaskStatus(str, Enum):
 
 class StartRequest(BaseModel):
     """Request to start a task."""
+    spec_name: str
     task_description: str
     branch_name: str
     feedback_comments: Optional[str] = None

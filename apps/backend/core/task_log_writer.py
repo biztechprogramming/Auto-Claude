@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Literal
 
-TaskLogPhase = Literal["planning", "coding", "validation"]
+TaskLogPhase = Literal["planning", "coding", "validation", "testing"]
 TaskPhaseStatus = Literal["pending", "active", "completed", "failed"]
 
 
@@ -37,7 +37,8 @@ class TaskLogWriter:
                 "phases": {
                     "planning": {"status": "pending", "entries": []},
                     "coding": {"status": "pending", "entries": []},
-                    "validation": {"status": "pending", "entries": []}
+                    "validation": {"status": "pending", "entries": []},
+                    "testing": {"status": "pending", "entries": []}
                 }
             }
             self._write_logs(initial_logs)
@@ -59,7 +60,8 @@ class TaskLogWriter:
             "phases": {
                 "planning": {"status": "pending", "entries": []},
                 "coding": {"status": "pending", "entries": []},
-                "validation": {"status": "pending", "entries": []}
+                "validation": {"status": "pending", "entries": []},
+                "testing": {"status": "pending", "entries": []}
             }
         }
 

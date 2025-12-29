@@ -226,7 +226,7 @@ export function registerProjectHandlers(
     IPC_CHANNELS.TAB_STATE_GET,
     async (): Promise<IPCResult<{ openProjectIds: string[]; activeProjectId: string | null; tabOrder: string[] }>> => {
       const tabState = projectStore.getTabState();
-      console.log('[IPC] TAB_STATE_GET returning:', tabState);
+      console.debug('[IPC] TAB_STATE_GET returning:', tabState);
       return { success: true, data: tabState };
     }
   );
@@ -237,7 +237,7 @@ export function registerProjectHandlers(
       _,
       tabState: { openProjectIds: string[]; activeProjectId: string | null; tabOrder: string[] }
     ): Promise<IPCResult> => {
-      console.log('[IPC] TAB_STATE_SAVE called with:', tabState);
+      console.debug('[IPC] TAB_STATE_SAVE called with:', tabState);
       projectStore.saveTabState(tabState);
       return { success: true };
     }

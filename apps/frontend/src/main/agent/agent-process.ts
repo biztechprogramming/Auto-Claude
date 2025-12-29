@@ -178,7 +178,19 @@ export class AgentProcessManager {
 
     // Parse Python command to handle space-separated commands like "py -3"
     const [pythonCommand, pythonBaseArgs] = parsePythonCommand(this.getPythonPath());
-    const childProcess = spawn(pythonCommand, [...pythonBaseArgs, ...args], {
+
+    // Log incoming args array before spawn
+    console.log('[AgentProcess] About to spawn with args:');
+    console.log('[AgentProcess] pythonCommand:', pythonCommand);
+    console.log('[AgentProcess] pythonBaseArgs:', pythonBaseArgs);
+    console.log('[AgentProcess] args received:', args);
+    console.log('[AgentProcess] Full args array for spawn:');
+    const fullArgs = [...pythonBaseArgs, ...args];
+    fullArgs.forEach((arg, idx) => {
+      console.log(`  [${idx}] type=${typeof arg}, value=${JSON.stringify(arg)}, isNull=${arg === null}, isUndefined=${arg === undefined}`);
+    });
+
+    const childProcess = spawn(pythonCommand, fullArgs, {
       cwd,
       env: {
         ...process.env,

@@ -230,6 +230,32 @@ class DockerIsolationStrategy(IsolationStrategy):
             return existing
         return self.create_environment(spec_name)
 
+    def _is_phase_complete(self, spec_name: str, phase: str) -> bool:
+        """
+        Check if a phase is already completed by reading task_logs.json.
+
+        Args:
+            spec_name: The spec name
+            phase: The phase name (coding, validation, testing)
+
+        Returns:
+            True if phase is marked as completed
+        """
+        import json
+        log_file = self.project_dir / ".auto-claude" / "specs" / spec_name / "task_logs.json"
+
+        if not log_file.exists():
+            return False
+
+        try:
+            with open(log_file, 'r') as f:
+                logs = json.load(f)
+
+            phase_status = logs.get("phases", {}).get(phase, {}).get("status")
+            return phase_status == "completed"
+        except Exception:
+            return False
+
     async def run_pipeline(
         self,
         spec_name: str,
@@ -237,27 +263,18 @@ class DockerIsolationStrategy(IsolationStrategy):
         on_status_change: Optional[callable] = None,
     ) -> bool:
         """
-        Run the Docker-based multi-container pipeline.
+        Run the Docker-based multi-container pipeline using workflow configuration.
 
-        Flow:
-        1. Developer container implements the plan
-        2. Evaluator container reviews quality
-        3. If rejected, loop back to Developer with comments
-        4. QA container runs tests
-        5. If failed, loop back to Developer with comments
-        6. If all pass, notify human
-
-        Kanban statuses:
-        - "planning" → Planning implementation
-        - "coding" → Developer implementing changes
-        - "ai_review" → Evaluator reviewing code quality
-        - "ai_testing" → QA running tests
-        - "ready_for_review" → All checks passed, ready for human review
-        - "needs_revision" → Failed checks, needs fixes
-        - "failed" → Max iterations or critical error
+        The workflow is defined in workflow_config.py and can be customized.
+        Each step runs in sequence, with feedback loops for steps that accept feedback.
         """
+        from core.isolation.workflow_config import get_workflow
+
         env_info = self.get_or_create_environment(spec_name)
         branch_name = env_info.branch_name
+
+        # Get workflow steps
+        workflow = get_workflow()
 
         accumulated_comments: list[FeedbackComment] = []
         iteration = 0
@@ -275,91 +292,100 @@ class DockerIsolationStrategy(IsolationStrategy):
         while iteration < self.max_feedback_iterations:
             iteration += 1
 
-            # CODING PHASE - Developer container
-            if on_status_change:
-                if iteration == 1:
-                    on_status_change(spec_name, "coding", "Implementing features...")
-                else:
-                    on_status_change(
-                        spec_name, "coding",
-                        f"Addressing feedback (iteration {iteration}/{self.max_feedback_iterations})"
+            # Execute each step in the workflow
+            results = {}
+
+            for step in workflow:
+                # Check if step should be skipped
+                if iteration == 1 and step.skip_if_complete and self._is_phase_complete(spec_name, step.log_phase):
+                    if on_status_change:
+                        on_status_change(spec_name, step.kanban_status, f"{step.description} - already completed, skipping")
+                    # Create mock success result
+                    results[step.name] = ContainerResult(
+                        role=step.role,
+                        success=True,
+                        exit_code=0,
+                        output=f"{step.log_phase} phase already completed",
+                        commit_sha=None,
                     )
+                    continue
 
-            dev_result = await self._orchestrator.run_developer(
-                spec_name=spec_name,
-                branch_name=branch_name,
-                plan=plan,
-                feedback_comments=accumulated_comments,
-            )
-
-            if not dev_result.success:
+                # Update status
                 if on_status_change:
-                    on_status_change(
-                        spec_name, "failed",
-                        f"Developer failed: {dev_result.output}"
-                    )
-                return False
+                    if iteration == 1:
+                        on_status_change(spec_name, step.kanban_status, step.description)
+                    else:
+                        on_status_change(
+                            spec_name, step.kanban_status,
+                            f"{step.description} (iteration {iteration}/{self.max_feedback_iterations})"
+                        )
 
-            # Update with commit info
-            if on_status_change and dev_result.commit_sha:
-                on_status_change(
-                    spec_name, "coding",
-                    f"Completed - commit {dev_result.commit_sha[:7]}"
+                # Prepare task description
+                task_description = step.task_template.format(spec_name=spec_name)
+
+                # Format feedback comments as JSON string if step accepts feedback
+                import json
+                feedback_str = None
+                if step.accepts_feedback and accumulated_comments:
+                    feedback_str = json.dumps([
+                        {
+                            "source": c.source.value,
+                            "message": c.message,
+                            "file_path": c.file_path,
+                            "line_number": c.line_number,
+                            "severity": c.severity,
+                        }
+                        for c in accumulated_comments
+                    ])
+
+                # Run the container step
+                result = await self._orchestrator._run_container_http(
+                    role=step.role,
+                    spec_name=spec_name,
+                    branch_name=branch_name,
+                    task_description=task_description,
+                    feedback_comments=feedback_str,
                 )
 
-            # AI REVIEW PHASE - Evaluator container
-            if on_status_change:
-                on_status_change(spec_name, "ai_review", "Reviewing code quality...")
+                results[step.name] = result
 
-            eval_result = await self._orchestrator.run_evaluator(
-                spec_name=spec_name,
-                branch_name=branch_name,
-                commit_sha=dev_result.commit_sha,
-            )
+                # Handle failure
+                if not result.success:
+                    # If step accepts feedback and we have iterations left, collect comments and retry
+                    if step.accepts_feedback and iteration < self.max_feedback_iterations:
+                        accumulated_comments.extend(result.comments)
+                        if on_status_change:
+                            on_status_change(
+                                spec_name, "needs_revision",
+                                f"{step.description} failed: {len(result.comments)} issues found"
+                            )
+                        break  # Break inner loop, will retry in next iteration
+                    else:
+                        # No retry, fail the pipeline
+                        if on_status_change:
+                            on_status_change(
+                                spec_name, "failed",
+                                f"{step.description} failed"
+                            )
+                        return False
 
-            if not eval_result.success:
-                # Rejected - collect comments and loop back
-                accumulated_comments.extend(eval_result.comments)
+                # Update success status
+                if on_status_change:
+                    on_status_change(spec_name, step.kanban_status, f"✓ {step.description} completed")
+
+            # Check if all steps succeeded
+            all_succeeded = all(r.success for r in results.values())
+
+            if all_succeeded:
+                # All steps passed!
                 if on_status_change:
                     on_status_change(
-                        spec_name, "needs_revision",
-                        f"AI Review rejected: {len(eval_result.comments)} issues found"
+                        spec_name, "ready_for_review",
+                        "All checks passed - ready for human review"
                     )
-                continue  # Loop back to developer
+                return True
 
-            if on_status_change:
-                on_status_change(spec_name, "ai_review", "✓ Code quality approved")
-
-            # AI TESTING PHASE - QA container
-            if on_status_change:
-                on_status_change(spec_name, "ai_testing", "Running automated tests...")
-
-            qa_result = await self._orchestrator.run_qa(
-                spec_name=spec_name,
-                branch_name=branch_name,
-                commit_sha=dev_result.commit_sha,
-            )
-
-            if not qa_result.success:
-                # Failed tests - collect comments and loop back
-                accumulated_comments.extend(qa_result.comments)
-                if on_status_change:
-                    on_status_change(
-                        spec_name, "needs_revision",
-                        f"AI Testing failed: {len(qa_result.comments)} test failures"
-                    )
-                continue  # Loop back to developer
-
-            if on_status_change:
-                on_status_change(spec_name, "ai_testing", "✓ All tests passed")
-
-            # All passed!
-            if on_status_change:
-                on_status_change(
-                    spec_name, "ready_for_review",
-                    f"All checks passed - ready for human review"
-                )
-            return True
+            # If we got here, a step failed and we need to retry (continue loop)
 
         # Max iterations reached
         if on_status_change:

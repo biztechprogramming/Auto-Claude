@@ -165,7 +165,7 @@ export class ProjectStore {
         : null,
       tabOrder: tabState.tabOrder.filter(id => validProjectIds.includes(id))
     };
-    console.log('[ProjectStore] Saving tab state:', this.data.tabState);
+    console.debug('[ProjectStore] Saving tab state:', this.data.tabState);
     this.save();
   }
 
@@ -237,24 +237,20 @@ export class ProjectStore {
    * Get tasks for a project by scanning specs directory
    */
   getTasks(projectId: string): Task[] {
-    console.warn('[ProjectStore] getTasks called with projectId:', projectId);
     const project = this.getProject(projectId);
     if (!project) {
-      console.warn('[ProjectStore] Project not found for id:', projectId);
+      console.error('[ProjectStore] Project not found for id:', projectId);
       return [];
     }
-    console.warn('[ProjectStore] Found project:', project.name, 'autoBuildPath:', project.autoBuildPath);
 
     const allTasks: Task[] = [];
     const specsBaseDir = getSpecsDir(project.autoBuildPath);
 
     // 1. Scan main project specs directory
     const mainSpecsDir = path.join(project.path, specsBaseDir);
-    console.warn('[ProjectStore] Main specsDir:', mainSpecsDir, 'exists:', existsSync(mainSpecsDir));
     if (existsSync(mainSpecsDir)) {
       const mainTasks = this.loadTasksFromSpecsDir(mainSpecsDir, project.path, 'main', projectId, specsBaseDir);
       allTasks.push(...mainTasks);
-      console.warn('[ProjectStore] Loaded', mainTasks.length, 'tasks from main project');
     }
 
     // 2. Scan worktree specs directories
@@ -275,7 +271,6 @@ export class ProjectStore {
               specsBaseDir
             );
             allTasks.push(...worktreeTasks);
-            console.warn('[ProjectStore] Loaded', worktreeTasks.length, 'tasks from worktree:', worktree.name);
           }
         }
       } catch (error) {
@@ -293,7 +288,7 @@ export class ProjectStore {
     }
 
     const tasks = Array.from(taskMap.values());
-    console.warn('[ProjectStore] Returning', tasks.length, 'unique tasks (after deduplication)');
+    console.debug('[ProjectStore] Returning', tasks.length, 'unique tasks (after deduplication)');
     return tasks;
   }
 

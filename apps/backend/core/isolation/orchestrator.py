@@ -149,13 +149,12 @@ class DockerOrchestrator:
         import logging
         logger = logging.getLogger(__name__)
 
-        # Port mapping for each role
-        port_map = {
-            ContainerRole.DEVELOPER: 8001,
-            ContainerRole.EVALUATOR: 8002,
-            ContainerRole.QA: 8003,
-        }
-        port = port_map[role]
+        # Get port from workflow config
+        from core.isolation.workflow_config import get_step_by_role
+        step = get_step_by_role(role)
+        if not step:
+            raise ValueError(f"No workflow step found for role: {role}")
+        port = step.port
 
         # Create container config
         container_name = self._get_container_name(spec_name, role)
@@ -178,13 +177,8 @@ class DockerOrchestrator:
 
         log_writer = TaskLogWriter(spec_dir)
 
-        # Map role to phase
-        phase_map = {
-            ContainerRole.DEVELOPER: "coding",
-            ContainerRole.EVALUATOR: "coding",  # Review is part of coding
-            ContainerRole.QA: "validation",
-        }
-        phase = phase_map[role]
+        # Get log phase from workflow config
+        phase = step.log_phase
 
         # Set phase to active
         log_writer.set_phase_status(phase, "active")
@@ -265,6 +259,9 @@ class DockerOrchestrator:
 
         except Exception as e:
             logger.error(f"{role.value} container failed: {e}")
+
+            # Add error details to logs before marking phase as failed
+            log_writer.add_log_entry(phase, f"Container error: {str(e)}", "error")
 
             # Mark phase as failed
             log_writer.mark_phase_complete(phase, success=False)
@@ -355,72 +352,22 @@ class DockerOrchestrator:
         commit_sha: Optional[str],
     ) -> ContainerResult:
         """
-        Run the evaluator container.
+        Run the evaluator container via HTTP-based communication.
 
         1. Clone the feature branch
         2. Run quality review prompts
         3. Return approval or rejection with comments
         """
-        container_name = self._get_container_name(spec_name, ContainerRole.EVALUATOR)
+        # Extract task description (placeholder for now)
+        task_description = f"Review code quality for {spec_name}"
 
-        env_vars = self._get_base_env_vars()
-        env_vars.update({
-            "SPEC_NAME": spec_name,
-            "BRANCH_NAME": branch_name,
-            "COMMIT_SHA": commit_sha or "",
-        })
-
-        cmd = [
-            "docker", "run", "--rm",
-            "--name", container_name,
-            "--memory", self.memory_limit,
-            "--cpu-shares", self.cpu_shares,
-            "--pids-limit", "256",
-        ]
-
-        for key, value in env_vars.items():
-            cmd.extend(["-e", f"{key}={value}"])
-
-        cmd.extend([
-            self.images[ContainerRole.EVALUATOR],
-            "python3", "/scripts/evaluator_agent.py",
-        ])
-
-        # Prevent MSYS path conversion on Windows (Git Bash)
-        env = os.environ.copy()
-        env["MSYS_NO_PATHCONV"] = "1"
-        result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True, env=env
-        )
-
-        # Parse output for approval/rejection and comments
-        comments = []
-        success = result.returncode == 0
-
-        # Look for JSON feedback in output
-        for line in result.stdout.split("\n"):
-            if line.startswith("FEEDBACK_JSON="):
-                try:
-                    feedback = json.loads(line.split("=", 1)[1])
-                    success = feedback.get("approved", False)
-                    for c in feedback.get("comments", []):
-                        comments.append(FeedbackComment(
-                            source=ContainerRole.EVALUATOR,
-                            message=c.get("message", ""),
-                            file_path=c.get("file_path"),
-                            line_number=c.get("line_number"),
-                            severity=c.get("severity", "error"),
-                        ))
-                except json.JSONDecodeError:
-                    pass
-                break
-
-        return ContainerResult(
+        # Use HTTP-based container communication (same as developer)
+        return await self._run_container_http(
             role=ContainerRole.EVALUATOR,
-            success=success,
-            exit_code=result.returncode,
-            output=result.stdout + result.stderr,
-            comments=comments,
+            spec_name=spec_name,
+            branch_name=branch_name,
+            task_description=task_description,
+            feedback_comments=None,
         )
 
     async def run_qa(
@@ -430,71 +377,20 @@ class DockerOrchestrator:
         commit_sha: Optional[str],
     ) -> ContainerResult:
         """
-        Run the QA container.
+        Run the QA container via HTTP-based communication.
 
         1. Clone the feature branch
         2. Run Playwright and other tests
         3. Return pass or failure with comments
         """
-        container_name = self._get_container_name(spec_name, ContainerRole.QA)
+        # Extract task description (placeholder for now)
+        task_description = f"Run automated tests for {spec_name}"
 
-        env_vars = self._get_base_env_vars()
-        env_vars.update({
-            "SPEC_NAME": spec_name,
-            "BRANCH_NAME": branch_name,
-            "COMMIT_SHA": commit_sha or "",
-        })
-
-        cmd = [
-            "docker", "run", "--rm",
-            "--name", container_name,
-            "--memory", self.memory_limit,
-            "--cpu-shares", self.cpu_shares,
-            "--pids-limit", "256",
-            # QA container may need more resources for browser testing
-            "--shm-size", "2g",
-        ]
-
-        for key, value in env_vars.items():
-            cmd.extend(["-e", f"{key}={value}"])
-
-        cmd.extend([
-            self.images[ContainerRole.QA],
-            "python3", "/scripts/qa_agent.py",
-        ])
-
-        # Prevent MSYS path conversion on Windows (Git Bash)
-        env = os.environ.copy()
-        env["MSYS_NO_PATHCONV"] = "1"
-        result = await asyncio.to_thread(
-            subprocess.run, cmd, capture_output=True, text=True, env=env
-        )
-
-        # Parse output for pass/fail and comments
-        comments = []
-        success = result.returncode == 0
-
-        for line in result.stdout.split("\n"):
-            if line.startswith("FEEDBACK_JSON="):
-                try:
-                    feedback = json.loads(line.split("=", 1)[1])
-                    success = feedback.get("passed", False)
-                    for c in feedback.get("comments", []):
-                        comments.append(FeedbackComment(
-                            source=ContainerRole.QA,
-                            message=c.get("message", ""),
-                            file_path=c.get("file_path"),
-                            line_number=c.get("line_number"),
-                            severity=c.get("severity", "error"),
-                        ))
-                except json.JSONDecodeError:
-                    pass
-                break
-
-        return ContainerResult(
+        # Use HTTP-based container communication (same as developer)
+        return await self._run_container_http(
             role=ContainerRole.QA,
-            success=success,
-            exit_code=result.returncode,
-            output=result.stdout + result.stderr,
-            comments=comments,
+            spec_name=spec_name,
+            branch_name=branch_name,
+            task_description=task_description,
+            feedback_comments=None,
         )

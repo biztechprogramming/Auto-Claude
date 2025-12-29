@@ -215,9 +215,12 @@ class DockerOrchestrator:
             except Exception as e:
                 logger.warning(f"Failed to start log streaming: {e}")
 
-            # Wait for API to be ready
+            # Wait for API to be ready (30s timeout for startup)
             if not client.wait_for_ready(timeout=30):
-                raise RuntimeError(f"{role.value} container API did not become ready")
+                error_msg = f"{role.value} container API did not become ready within 30s"
+                log_writer.add_log_entry(phase, error_msg, "error")
+                log_writer.mark_phase_complete(phase, success=False)
+                raise RuntimeError(error_msg)
 
             # Clone repository first
             logger.info(f"Cloning repository in {role.value} container...")
@@ -257,13 +260,52 @@ class DockerOrchestrator:
                 commit_sha=None,  # TODO: Extract from logs if needed
             )
 
-        except Exception as e:
+        except TimeoutError as e:
+            # Timeout error - container took too long
+            logger.error(f"{role.value} container timeout: {e}")
+            log_writer.add_log_entry(phase, f"Container timeout: {str(e)}", "error")
+            log_writer.mark_phase_complete(phase, success=False)
+
+            # Try to get logs even on timeout
+            try:
+                logs = await client.get_logs(count=1000)
+                output = "\n".join([f"[{log['level']}] {log['message']}" for log in logs])
+            except:
+                output = str(e)
+
+            return ContainerResult(
+                role=role,
+                success=False,
+                exit_code=124,  # Standard timeout exit code
+                output=output,
+                commit_sha=None,
+            )
+
+        except RuntimeError as e:
+            # Task failed or container startup failed
             logger.error(f"{role.value} container failed: {e}")
-
-            # Add error details to logs before marking phase as failed
             log_writer.add_log_entry(phase, f"Container error: {str(e)}", "error")
+            log_writer.mark_phase_complete(phase, success=False)
 
-            # Mark phase as failed
+            # Try to get logs even on failure
+            try:
+                logs = await client.get_logs(count=1000)
+                output = "\n".join([f"[{log['level']}] {log['message']}" for log in logs])
+            except:
+                output = str(e)
+
+            return ContainerResult(
+                role=role,
+                success=False,
+                exit_code=1,
+                output=output,
+                commit_sha=None,
+            )
+
+        except Exception as e:
+            # Unexpected error
+            logger.error(f"{role.value} container unexpected error: {e}")
+            log_writer.add_log_entry(phase, f"Unexpected error: {str(e)}", "error")
             log_writer.mark_phase_complete(phase, success=False)
 
             # Try to get logs even on failure

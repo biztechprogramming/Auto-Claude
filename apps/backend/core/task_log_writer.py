@@ -13,6 +13,7 @@ from typing import Optional, Literal
 
 TaskLogPhase = Literal["planning", "coding", "validation", "testing"]
 TaskPhaseStatus = Literal["pending", "active", "completed", "failed"]
+WorkflowStatus = Literal["planning", "coding", "ai_review", "ai_testing", "needs_revision", "ready_for_review", "failed"]
 
 
 class TaskLogWriter:
@@ -34,11 +35,34 @@ class TaskLogWriter:
                 "spec_id": self.spec_dir.name,
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat(),
+                "workflow_status": "planning",
+                "current_step": None,
+                "iteration": 0,
                 "phases": {
-                    "planning": {"status": "pending", "entries": []},
-                    "coding": {"status": "pending", "entries": []},
-                    "validation": {"status": "pending", "entries": []},
-                    "testing": {"status": "pending", "entries": []}
+                    "planning": {
+                        "status": "pending",
+                        "started_at": None,
+                        "completed_at": None,
+                        "entries": []
+                    },
+                    "coding": {
+                        "status": "pending",
+                        "started_at": None,
+                        "completed_at": None,
+                        "entries": []
+                    },
+                    "validation": {
+                        "status": "pending",
+                        "started_at": None,
+                        "completed_at": None,
+                        "entries": []
+                    },
+                    "testing": {
+                        "status": "pending",
+                        "started_at": None,
+                        "completed_at": None,
+                        "entries": []
+                    }
                 }
             }
             self._write_logs(initial_logs)
@@ -57,27 +81,71 @@ class TaskLogWriter:
             "spec_id": self.spec_dir.name,
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
+            "workflow_status": "planning",
+            "current_step": None,
+            "iteration": 0,
             "phases": {
-                "planning": {"status": "pending", "entries": []},
-                "coding": {"status": "pending", "entries": []},
-                "validation": {"status": "pending", "entries": []},
-                "testing": {"status": "pending", "entries": []}
+                "planning": {
+                    "status": "pending",
+                    "started_at": None,
+                    "completed_at": None,
+                    "entries": []
+                },
+                "coding": {
+                    "status": "pending",
+                    "started_at": None,
+                    "completed_at": None,
+                    "entries": []
+                },
+                "validation": {
+                    "status": "pending",
+                    "started_at": None,
+                    "completed_at": None,
+                    "entries": []
+                },
+                "testing": {
+                    "status": "pending",
+                    "started_at": None,
+                    "completed_at": None,
+                    "entries": []
+                }
             }
         }
 
     def _write_logs(self, logs: dict):
-        """Write logs to file atomically."""
+        """Write logs to file atomically with Windows file lock retry."""
+        import time
+
         logs["updated_at"] = datetime.now().isoformat()
 
         # Atomic write: write to temp file, then rename
+        # Retry on Windows file lock errors
         temp_file = self.log_file.with_suffix(".tmp")
-        temp_file.write_text(json.dumps(logs, indent=2))
-        temp_file.replace(self.log_file)
+
+        for attempt in range(3):
+            try:
+                temp_file.write_text(json.dumps(logs, indent=2))
+                temp_file.replace(self.log_file)
+                return
+            except (OSError, PermissionError) as e:
+                if attempt < 2:
+                    time.sleep(0.1)  # 100ms delay before retry
+                else:
+                    # Last attempt failed, raise the error
+                    raise
 
     def set_phase_status(self, phase: TaskLogPhase, status: TaskPhaseStatus):
         """Update phase status (pending -> active -> completed/failed)."""
         logs = self._read_logs()
         logs["phases"][phase]["status"] = status
+
+        # Update timestamps based on status
+        now = datetime.now().isoformat()
+        if status == "active" and logs["phases"][phase]["started_at"] is None:
+            logs["phases"][phase]["started_at"] = now
+        elif status in ("completed", "failed"):
+            logs["phases"][phase]["completed_at"] = now
+
         self._write_logs(logs)
 
     def add_log_entry(
@@ -152,3 +220,69 @@ class TaskLogWriter:
         message = "✓ Phase completed successfully" if success else "✗ Phase failed"
         entry_type = "success" if success else "error"
         self.add_log_entry(phase, message, entry_type)
+
+    # Workflow-level state management methods
+
+    def set_workflow_status(self, status: WorkflowStatus):
+        """Update the overall workflow status."""
+        logs = self._read_logs()
+        logs["workflow_status"] = status
+        self._write_logs(logs)
+
+    def set_current_step(self, step_name: Optional[str]):
+        """Update the current step being executed."""
+        logs = self._read_logs()
+        logs["current_step"] = step_name
+        self._write_logs(logs)
+
+    def set_iteration(self, iteration: int):
+        """Update the current iteration counter."""
+        logs = self._read_logs()
+        logs["iteration"] = iteration
+        self._write_logs(logs)
+
+    def get_workflow_status(self) -> WorkflowStatus:
+        """Get the current workflow status."""
+        logs = self._read_logs()
+        return logs.get("workflow_status", "planning")
+
+    def get_iteration(self) -> int:
+        """Get the current iteration counter."""
+        logs = self._read_logs()
+        return logs.get("iteration", 0)
+
+    def is_phase_complete(self, phase: TaskLogPhase) -> bool:
+        """Check if a phase is marked as completed."""
+        logs = self._read_logs()
+        return logs.get("phases", {}).get(phase, {}).get("status") == "completed"
+
+    def reset_phase(self, phase: TaskLogPhase):
+        """Reset a phase to pending state (for manual retry)."""
+        logs = self._read_logs()
+        logs["phases"][phase] = {
+            "status": "pending",
+            "started_at": None,
+            "completed_at": None,
+            "entries": []
+        }
+        self._write_logs(logs)
+
+    def update_workflow_state(self, workflow_status: WorkflowStatus, current_step: Optional[str] = None, iteration: Optional[int] = None):
+        """
+        Update multiple workflow state fields atomically.
+
+        Args:
+            workflow_status: Overall workflow status
+            current_step: Current step name (optional)
+            iteration: Current iteration (optional)
+        """
+        logs = self._read_logs()
+        logs["workflow_status"] = workflow_status
+
+        if current_step is not None:
+            logs["current_step"] = current_step
+
+        if iteration is not None:
+            logs["iteration"] = iteration
+
+        self._write_logs(logs)

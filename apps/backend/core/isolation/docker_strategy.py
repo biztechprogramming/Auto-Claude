@@ -267,11 +267,22 @@ class DockerIsolationStrategy(IsolationStrategy):
 
         The workflow is defined in workflow_config.py and can be customized.
         Each step runs in sequence, with feedback loops for steps that accept feedback.
+
+        State machine implementation following DOCKER_WORKFLOW_DESIGN.md:
+        - PENDING → ACTIVE → COMPLETED → [Next Step]
+        - PENDING → ACTIVE → FAILED → [Retry if accepts_feedback] → ACTIVE
+        - PENDING → SKIPPED → [Next Step] (if skip_if_complete=true and already done)
         """
         from core.isolation.workflow_config import get_workflow
+        from core.task_log_writer import TaskLogWriter
 
         env_info = self.get_or_create_environment(spec_name)
         branch_name = env_info.branch_name
+
+        # Initialize task log writer
+        spec_dir = self.project_dir / ".auto-claude" / "specs" / spec_name
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        log_writer = TaskLogWriter(spec_dir)
 
         # Get workflow steps
         workflow = get_workflow()
@@ -280,6 +291,8 @@ class DockerIsolationStrategy(IsolationStrategy):
         iteration = 0
 
         # Planning phase (if plan has subtasks, show them)
+        log_writer.update_workflow_state("planning", current_step=None, iteration=0)
+
         if on_status_change:
             on_status_change(spec_name, "planning", "Creating implementation plan")
 
@@ -291,15 +304,22 @@ class DockerIsolationStrategy(IsolationStrategy):
 
         while iteration < self.max_feedback_iterations:
             iteration += 1
+            log_writer.set_iteration(iteration)
 
             # Execute each step in the workflow
             results = {}
 
             for step in workflow:
-                # Check if step should be skipped
-                if iteration == 1 and step.skip_if_complete and self._is_phase_complete(spec_name, step.log_phase):
+                # Update current step in workflow state
+                log_writer.set_current_step(step.name)
+
+                # Check if step should be skipped (first iteration only)
+                if iteration == 1 and step.skip_if_complete and log_writer.is_phase_complete(step.log_phase):
                     if on_status_change:
                         on_status_change(spec_name, step.kanban_status, f"{step.description} - already completed, skipping")
+
+                    log_writer.add_log_entry(step.log_phase, f"Skipping {step.description} (already completed)", "info")
+
                     # Create mock success result
                     results[step.name] = ContainerResult(
                         role=step.role,
@@ -310,14 +330,17 @@ class DockerIsolationStrategy(IsolationStrategy):
                     )
                     continue
 
-                # Update status
+                # Update workflow status to this step's kanban status
+                log_writer.set_workflow_status(step.kanban_status)
+
+                # Update status for UI
                 if on_status_change:
                     if iteration == 1:
                         on_status_change(spec_name, step.kanban_status, step.description)
                     else:
                         on_status_change(
                             spec_name, step.kanban_status,
-                            f"{step.description} (iteration {iteration}/{self.max_feedback_iterations})"
+                            f"{step.description} (retry {iteration}/{self.max_feedback_iterations})"
                         )
 
                 # Prepare task description
@@ -349,35 +372,85 @@ class DockerIsolationStrategy(IsolationStrategy):
 
                 results[step.name] = result
 
-                # Handle failure
+                # Handle step result
                 if not result.success:
-                    # If step accepts feedback and we have iterations left, collect comments and retry
+                    # Step failed - implement state machine transitions per design spec
+
+                    # Case 1: Step accepts feedback AND we have iterations left
                     if step.accepts_feedback and iteration < self.max_feedback_iterations:
+                        # Collect feedback comments for next iteration
                         accumulated_comments.extend(result.comments)
+
+                        # Log the failure reason
+                        log_writer.add_log_entry(
+                            step.log_phase,
+                            f"{step.description} failed: {len(result.comments)} issues found",
+                            "error"
+                        )
+
+                        # Update workflow status to needs_revision
+                        log_writer.set_workflow_status("needs_revision")
+
                         if on_status_change:
                             on_status_change(
                                 spec_name, "needs_revision",
-                                f"{step.description} failed: {len(result.comments)} issues found"
+                                f"{step.description} failed: {len(result.comments)} issues found - will retry"
                             )
-                        break  # Break inner loop, will retry in next iteration
+
+                        # Phase is already marked as failed by orchestrator
+                        # Break inner loop to retry from beginning
+                        break
+
+                    # Case 2: No retry available - fail permanently
                     else:
-                        # No retry, fail the pipeline
+                        # Log the permanent failure
+                        log_writer.add_log_entry(
+                            step.log_phase,
+                            f"{step.description} failed permanently (no retry available)",
+                            "error"
+                        )
+
+                        # Update workflow status to failed
+                        log_writer.set_workflow_status("failed")
+
                         if on_status_change:
                             on_status_change(
                                 spec_name, "failed",
-                                f"{step.description} failed"
+                                f"{step.description} failed - no retry available"
                             )
+
+                        # Phase is already marked as failed by orchestrator
+                        # Exit the pipeline
                         return False
 
-                # Update success status
-                if on_status_change:
-                    on_status_change(spec_name, step.kanban_status, f"✓ {step.description} completed")
+                # Step succeeded
+                else:
+                    # Log success
+                    log_writer.add_log_entry(
+                        step.log_phase,
+                        f"✓ {step.description} completed successfully",
+                        "success"
+                    )
+
+                    # Phase is already marked as completed by orchestrator
+                    # Update UI status
+                    if on_status_change:
+                        on_status_change(spec_name, step.kanban_status, f"✓ {step.description} completed")
 
             # Check if all steps succeeded
             all_succeeded = all(r.success for r in results.values())
 
             if all_succeeded:
-                # All steps passed!
+                # All steps passed! Update workflow status to ready_for_review
+                log_writer.set_workflow_status("ready_for_review")
+                log_writer.set_current_step(None)  # No current step when complete
+
+                log_writer.add_log_entry(
+                    "testing",  # Add to last phase
+                    "All workflow steps completed successfully",
+                    "success"
+                )
+
                 if on_status_change:
                     on_status_change(
                         spec_name, "ready_for_review",
@@ -387,7 +460,16 @@ class DockerIsolationStrategy(IsolationStrategy):
 
             # If we got here, a step failed and we need to retry (continue loop)
 
-        # Max iterations reached
+        # Max iterations reached without success
+        log_writer.set_workflow_status("failed")
+        log_writer.set_current_step(None)
+
+        log_writer.add_log_entry(
+            "coding",  # Add to first phase as general error
+            f"Max iterations ({self.max_feedback_iterations}) reached without success",
+            "error"
+        )
+
         if on_status_change:
             on_status_change(
                 spec_name, "failed",

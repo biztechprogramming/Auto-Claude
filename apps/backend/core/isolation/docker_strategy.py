@@ -130,7 +130,7 @@ class DockerIsolationStrategy(IsolationStrategy):
         )
 
     def _detect_repo_url(self) -> str:
-        """Detect git remote URL."""
+        """Detect git remote URL and convert SSH to HTTPS for Docker."""
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
             cwd=self.project_dir,
@@ -138,7 +138,12 @@ class DockerIsolationStrategy(IsolationStrategy):
             text=True,
         )
         if result.returncode == 0:
-            return result.stdout.strip()
+            url = result.stdout.strip()
+            # Convert SSH URLs to HTTPS for Docker containers
+            # git@github.com:user/repo.git -> https://github.com/user/repo.git
+            if url.startswith("git@"):
+                url = url.replace(":", "/", 1).replace("git@", "https://")
+            return url
         raise RuntimeError("Could not detect repository URL. Set REPO_URL env var.")
 
     def _detect_base_branch(self) -> str:
@@ -302,6 +307,10 @@ class DockerIsolationStrategy(IsolationStrategy):
                 subtask_summary = f"Plan: {len(subtasks)} subtasks"
                 on_status_change(spec_name, "planning", subtask_summary)
 
+        # Mark planning phase as complete before starting workflow
+        log_writer.mark_phase_complete("planning", success=True)
+        log_writer.add_log_entry("planning", "Implementation plan ready", "info")
+
         while iteration < self.max_feedback_iterations:
             iteration += 1
             log_writer.set_iteration(iteration)
@@ -330,10 +339,10 @@ class DockerIsolationStrategy(IsolationStrategy):
                     )
                     continue
 
-                # Update workflow status to this step's kanban status
-                log_writer.set_workflow_status(step.kanban_status)
+                # DO NOT set workflow status here - wait until step succeeds!
+                # (Setting it here makes the next step appear as "running" while current step is still active)
 
-                # Update status for UI
+                # Update status for UI (but not workflow status yet)
                 if on_status_change:
                     if iteration == 1:
                         on_status_change(spec_name, step.kanban_status, step.description)
@@ -343,8 +352,15 @@ class DockerIsolationStrategy(IsolationStrategy):
                             f"{step.description} (retry {iteration}/{self.max_feedback_iterations})"
                         )
 
-                # Prepare task description
-                task_description = step.task_template.format(spec_name=spec_name)
+                # Load the full spec content for developer container
+                spec_dir = self.project_dir / ".auto-claude" / "specs" / spec_name
+                spec_file = spec_dir / "spec.md"
+                spec_content = ""
+                if spec_file.exists():
+                    spec_content = spec_file.read_text(encoding="utf-8")
+                else:
+                    # Fallback: use task description from template
+                    spec_content = step.task_template.format(spec_name=spec_name)
 
                 # Format feedback comments as JSON string if step accepts feedback
                 import json
@@ -366,7 +382,7 @@ class DockerIsolationStrategy(IsolationStrategy):
                     role=step.role,
                     spec_name=spec_name,
                     branch_name=branch_name,
-                    task_description=task_description,
+                    spec_content=spec_content,
                     feedback_comments=feedback_str,
                 )
 
@@ -433,6 +449,9 @@ class DockerIsolationStrategy(IsolationStrategy):
                     )
 
                     # Phase is already marked as completed by orchestrator
+                    # NOW update the workflow status (after step completes, not before it starts)
+                    log_writer.set_workflow_status(step.kanban_status)
+
                     # Update UI status
                     if on_status_change:
                         on_status_change(spec_name, step.kanban_status, f"✓ {step.description} completed")

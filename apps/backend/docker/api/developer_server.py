@@ -5,12 +5,23 @@ Runs on port 8001 and handles development tasks.
 """
 
 import logging
+import os
 from pathlib import Path
 from datetime import datetime
 
 from base_server import BaseContainerServer, StartRequest, TaskStatus, create_start_endpoint
 
 logger = logging.getLogger(__name__)
+
+# Check for Claude Agent SDK
+try:
+    from claude_agent_sdk import query, ClaudeAgentOptions
+    CLAUDE_SDK_AVAILABLE = True
+    logger.info("Claude Agent SDK loaded successfully")
+except ImportError as e:
+    logger.error(f"Claude Agent SDK import failed: {e}")
+    logger.warning("Claude SDK not available - using placeholder implementation")
+    CLAUDE_SDK_AVAILABLE = False
 
 
 class DeveloperServer(BaseContainerServer):
@@ -21,7 +32,7 @@ class DeveloperServer(BaseContainerServer):
         create_start_endpoint(self)
 
     async def _run_task(self, request: StartRequest):
-        """Execute development task."""
+        """Execute development task using Claude SDK."""
         try:
             logger.info("=" * 70)
             logger.info("DEVELOPER AGENT STARTING")
@@ -33,27 +44,29 @@ class DeveloperServer(BaseContainerServer):
             if not repo_dir.exists() or not (repo_dir / ".git").exists():
                 raise RuntimeError("Workspace not initialized. Call /clone first.")
 
-            logger.info(f"Task: {request.task_description}")
             logger.info(f"Working directory: {repo_dir}")
+            logger.info(f"Spec: {request.spec_name}")
+            logger.info(f"Spec content length: {len(request.spec_content)} chars")
+            logger.info(f"Spec content preview (first 200 chars): {request.spec_content[:200]}")
 
             # Create and checkout the feature branch
             logger.info(f"Creating branch: {request.branch_name}")
             await self._checkout_branch(repo_dir, request.branch_name)
 
-            # TODO: Integrate with Claude SDK to actually execute the task
-            # For now, just demonstrate file modification
-            logger.info("Executing task (placeholder implementation)...")
-
-            # Example: Modify README.md
-            readme = repo_dir / "README.md"
-            if readme.exists():
-                content = readme.read_text()
-                content += f"\n\n## Container Test\nModified by containerized agent: {request.task_description}\n"
-                readme.write_text(content)
-                logger.info("Modified README.md")
+            # Use Claude SDK to implement the spec
+            logger.info(f"CLAUDE_SDK_AVAILABLE = {CLAUDE_SDK_AVAILABLE}")
+            if CLAUDE_SDK_AVAILABLE:
+                logger.info("Using Claude SDK implementation")
+                await self._execute_with_claude_sdk(request, repo_dir)
+            else:
+                # Fallback: placeholder implementation
+                logger.warning("Claude SDK not available - using placeholder")
+                logger.warning("This will only modify README.md and not implement the spec!")
+                await self._execute_placeholder(request, repo_dir)
 
             # Commit changes
-            await self._commit_changes(repo_dir, f"Implement: {request.task_description}")
+            commit_message = f"feat: Implement {request.spec_name}\n\n{self._get_commit_body(request)}"
+            await self._commit_changes(repo_dir, commit_message)
             logger.info("Changes committed locally")
 
             # Push the new branch to remote
@@ -72,6 +85,133 @@ class DeveloperServer(BaseContainerServer):
             self.error = str(e)
             self.status = TaskStatus.FAILED
             self.completed_at = datetime.now()
+
+    async def _execute_with_claude_sdk(self, request: StartRequest, repo_dir: Path):
+        """Execute task using Claude SDK."""
+        logger.info("=" * 70)
+        logger.info("EXECUTING WITH CLAUDE SDK")
+        logger.info("=" * 70)
+
+        # Load coder prompt
+        coder_prompt_file = Path("/app/prompts/coder.md")
+        logger.info(f"Looking for coder prompt at: {coder_prompt_file}")
+        if not coder_prompt_file.exists():
+            raise FileNotFoundError(f"Coder prompt not found: {coder_prompt_file}")
+
+        coder_prompt = coder_prompt_file.read_text(encoding="utf-8")
+        logger.info(f"Loaded coder prompt: {len(coder_prompt)} chars")
+
+        # Build the full prompt
+        full_prompt = f"""{coder_prompt}
+
+# Specification to Implement
+
+{request.spec_content}
+
+# Task Details
+
+- Working Directory: {repo_dir}
+- Branch: {request.branch_name}
+- Spec: {request.spec_name}
+
+"""
+
+        # Add feedback comments if any
+        if request.feedback_comments:
+            logger.info("Adding feedback comments to prompt")
+            full_prompt += f"""
+
+# Feedback from Previous Iteration
+
+{request.feedback_comments}
+
+Please address the feedback above while implementing the specification.
+"""
+
+        logger.info(f"Full prompt length: {len(full_prompt)} chars")
+        logger.info(f"Full prompt preview (first 500 chars):\n{full_prompt[:500]}")
+
+        # Verify OAuth token
+        oauth_token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+        if not oauth_token:
+            raise ValueError("CLAUDE_CODE_OAUTH_TOKEN not set")
+
+        logger.info("=" * 70)
+        logger.info("STARTING CLAUDE AGENT SDK SESSION")
+        logger.info(f"Working directory: {repo_dir}")
+        logger.info("=" * 70)
+
+        # Use Claude Agent SDK query function
+        # It returns an async generator that yields messages
+        try:
+            async for message in query(
+                prompt=full_prompt,
+                options=ClaudeAgentOptions(
+                    # All tools available - Claude will autonomously use what it needs
+                    allowed_tools=None,  # None = all tools allowed
+                )
+            ):
+                # Log useful information from messages
+                msg_type = getattr(message, 'type', 'unknown')
+
+                if msg_type == 'text':
+                    # Text content from Claude
+                    text = getattr(message, 'text', '')
+                    if text:
+                        logger.info(f"[Claude] {text[:200]}")  # First 200 chars
+
+                elif msg_type == 'tool_use':
+                    # Claude is using a tool
+                    tool_name = getattr(message, 'name', 'unknown')
+                    logger.info(f"[Tool Use] {tool_name}")
+
+                elif msg_type == 'tool_result':
+                    # Tool execution result
+                    tool_name = getattr(message, 'tool_name', 'unknown')
+                    logger.info(f"[Tool Result] {tool_name} completed")
+
+                elif hasattr(message, 'content'):
+                    # Generic content message
+                    content = message.content
+                    if isinstance(content, list) and len(content) > 0:
+                        first_item = content[0]
+                        if hasattr(first_item, 'type'):
+                            if first_item.type == 'text':
+                                text = getattr(first_item, 'text', '')[:200]
+                                logger.info(f"[Claude] {text}")
+                            elif first_item.type == 'tool_use':
+                                tool_name = getattr(first_item, 'name', 'unknown')
+                                logger.info(f"[Tool Use] {tool_name}")
+                    else:
+                        logger.info(f"[Message] type={msg_type}")
+
+            logger.info("=" * 70)
+            logger.info("CLAUDE AGENT SDK SESSION COMPLETED SUCCESSFULLY")
+            logger.info("=" * 70)
+
+        except Exception as e:
+            logger.error(f"Claude Agent SDK session failed: {e}", exc_info=True)
+            raise RuntimeError(f"Claude Agent SDK failed: {e}")
+
+    async def _execute_placeholder(self, request: StartRequest, repo_dir: Path):
+        """Placeholder implementation when Claude SDK is not available."""
+        logger.info("Executing task (placeholder implementation)...")
+
+        # Example: Modify README.md
+        readme = repo_dir / "README.md"
+        if readme.exists():
+            content = readme.read_text()
+            task_desc = request.task_description or request.spec_name
+            content += f"\n\n## Container Test\nModified by containerized agent: {task_desc}\n"
+            readme.write_text(content)
+            logger.info("Modified README.md")
+
+    def _get_commit_body(self, request: StartRequest) -> str:
+        """Generate commit message body."""
+        body = f"Specification: {request.spec_name}"
+        if request.feedback_comments:
+            body += "\n\nAddresses feedback from evaluator/QA"
+        return body
 
 
 if __name__ == "__main__":

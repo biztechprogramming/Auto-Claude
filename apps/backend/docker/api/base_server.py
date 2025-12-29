@@ -44,9 +44,11 @@ class TaskStatus(str, Enum):
 class StartRequest(BaseModel):
     """Request to start a task."""
     spec_name: str
-    task_description: str
+    spec_content: str  # Full spec.md content
     branch_name: str
     feedback_comments: Optional[str] = None
+    # Legacy field for backward compatibility
+    task_description: Optional[str] = None
 
 
 class CloneRequest(BaseModel):
@@ -283,14 +285,21 @@ class BaseContainerServer:
         return repo_dir
 
     async def _authenticate_github(self, token: str):
-        """Authenticate GitHub CLI."""
+        """Authenticate GitHub CLI and configure git credentials."""
         logger.info("Authenticating with GitHub...")
 
         try:
+            # First, ensure GH_TOKEN is in environment
+            env = os.environ.copy()
+            if token:
+                env["GH_TOKEN"] = token
+
+            # Use gh auth setup-git to configure git credential helper
             process = await asyncio.create_subprocess_exec(
                 "gh", "auth", "setup-git",
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                env=env
             )
 
             stdout, stderr = await process.communicate()
@@ -367,14 +376,34 @@ class BaseContainerServer:
         """Commit changes."""
         logger.info("Committing changes...")
 
+        # Check git status first
+        status_process = await asyncio.create_subprocess_exec(
+            "git", "status", "--porcelain",
+            cwd=str(repo_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        status_stdout, status_stderr = await status_process.communicate()
+        status_output = status_stdout.decode().strip()
+
+        if not status_output:
+            logger.info("No changes to commit (git status is clean)")
+            return
+
+        logger.info(f"Changes detected:\n{status_output}")
+
         # Add all changes
-        process = await asyncio.create_subprocess_exec(
+        add_process = await asyncio.create_subprocess_exec(
             "git", "add", ".",
             cwd=str(repo_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
-        await process.communicate()
+        add_stdout, add_stderr = await add_process.communicate()
+
+        if add_process.returncode != 0:
+            logger.error(f"git add failed: {add_stderr.decode()}")
+            raise RuntimeError(f"git add failed: {add_stderr.decode()}")
 
         # Commit
         process = await asyncio.create_subprocess_exec(
@@ -387,12 +416,22 @@ class BaseContainerServer:
         stdout, stderr = await process.communicate()
 
         if process.returncode != 0:
+            stderr_text = stderr.decode()
+            stdout_text = stdout.decode()
+
             # Check if there are no changes to commit
-            if "nothing to commit" in stderr.decode():
+            if "nothing to commit" in stderr_text or "nothing to commit" in stdout_text:
                 logger.info("No changes to commit")
                 return
-            logger.error(f"Commit failed: {stderr.decode()}")
-            raise RuntimeError(f"Commit failed: {stderr.decode()}")
+
+            error_msg = f"Commit failed with return code {process.returncode}"
+            if stderr_text:
+                error_msg += f": {stderr_text}"
+            if stdout_text:
+                error_msg += f" (stdout: {stdout_text})"
+
+            logger.error(error_msg)
+            raise RuntimeError(error_msg)
 
         logger.info("Changes committed")
 

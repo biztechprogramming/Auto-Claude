@@ -138,7 +138,7 @@ class DockerOrchestrator:
         role: ContainerRole,
         spec_name: str,
         branch_name: str,
-        task_description: str,
+        spec_content: str,
         feedback_comments: Optional[str] = None,
     ) -> ContainerResult:
         """
@@ -233,7 +233,7 @@ class DockerOrchestrator:
                 "base_branch": self.base_branch,
                 "branch_name": branch_name,
                 "spec_name": spec_name,
-                "task_description": task_description,
+                "spec_content": spec_content,
                 "feedback_comments": feedback_comments,
             }
 
@@ -375,15 +375,22 @@ class DockerOrchestrator:
                 for c in feedback_comments
             ])
 
-        # Extract a concise task description from plan
-        task_description = self._extract_task_description(plan, spec_name)
+        # Load the full spec content
+        spec_dir = self.project_dir / ".auto-claude" / "specs" / spec_name
+        spec_file = spec_dir / "spec.md"
+        spec_content = ""
+        if spec_file.exists():
+            spec_content = spec_file.read_text(encoding="utf-8")
+        else:
+            # Fallback: extract from plan
+            spec_content = self._extract_task_description(plan, spec_name)
 
         # Use HTTP-based container communication
         return await self._run_container_http(
             role=ContainerRole.DEVELOPER,
             spec_name=spec_name,
             branch_name=branch_name,
-            task_description=task_description,
+            spec_content=spec_content,
             feedback_comments=feedback_str,
         )
 
@@ -400,15 +407,22 @@ class DockerOrchestrator:
         2. Run quality review prompts
         3. Return approval or rejection with comments
         """
-        # Extract task description (placeholder for now)
-        task_description = f"Review code quality for {spec_name}"
+        # Load the full spec content
+        spec_dir = self.project_dir / ".auto-claude" / "specs" / spec_name
+        spec_file = spec_dir / "spec.md"
+        spec_content = ""
+        if spec_file.exists():
+            spec_content = spec_file.read_text(encoding="utf-8")
+        else:
+            # Fallback
+            spec_content = f"Review code quality for {spec_name}"
 
         # Use HTTP-based container communication (same as developer)
         return await self._run_container_http(
             role=ContainerRole.EVALUATOR,
             spec_name=spec_name,
             branch_name=branch_name,
-            task_description=task_description,
+            spec_content=spec_content,
             feedback_comments=None,
         )
 
@@ -425,14 +439,21 @@ class DockerOrchestrator:
         2. Run Playwright and other tests
         3. Return pass or failure with comments
         """
-        # Extract task description (placeholder for now)
-        task_description = f"Run automated tests for {spec_name}"
+        # Load the full spec content
+        spec_dir = self.project_dir / ".auto-claude" / "specs" / spec_name
+        spec_file = spec_dir / "spec.md"
+        spec_content = ""
+        if spec_file.exists():
+            spec_content = spec_file.read_text(encoding="utf-8")
+        else:
+            # Fallback
+            spec_content = f"Run automated tests for {spec_name}"
 
         # Use HTTP-based container communication (same as developer)
         return await self._run_container_http(
             role=ContainerRole.QA,
             spec_name=spec_name,
             branch_name=branch_name,
-            task_description=task_description,
+            spec_content=spec_content,
             feedback_comments=None,
         )

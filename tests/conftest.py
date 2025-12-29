@@ -1112,3 +1112,66 @@ def temp_project(temp_git_repo: Path):
     )
 
     return temp_git_repo
+
+
+# =============================================================================
+# DOCKER ISOLATION FIXTURES
+# =============================================================================
+
+@pytest.fixture
+def docker_git_repo(temp_git_repo: Path):
+    """
+    Git repository fixture with remote configured for Docker tests.
+
+    Sets up a git repo with:
+    - Initial commit on main branch
+    - Configured remote URL (required for DockerIsolationStrategy)
+    - User name and email configured
+    """
+    # Add a fake remote URL
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/test/repo.git"],
+        cwd=temp_git_repo,
+        capture_output=True
+    )
+
+    return temp_git_repo
+
+
+@pytest.fixture
+def docker_strategy(docker_git_repo: Path):
+    """
+    Create a DockerIsolationStrategy instance for testing.
+
+    Provides all required parameters to avoid git detection failures.
+    """
+    from apps.backend.core.isolation.docker_strategy import DockerIsolationStrategy
+
+    return DockerIsolationStrategy(
+        project_dir=docker_git_repo,
+        base_branch="main",
+        repo_url="https://github.com/test/repo.git"
+    )
+
+
+@pytest.fixture
+def orchestrator(docker_git_repo: Path):
+    """
+    Create a DockerOrchestrator instance for testing.
+
+    Provides minimal config with all required parameters.
+    Uses docker_git_repo which has a proper git setup with remote.
+    """
+    from apps.backend.core.isolation.orchestrator import DockerOrchestrator
+    from apps.backend.core.isolation.base import ContainerRole
+
+    return DockerOrchestrator(
+        project_dir=docker_git_repo,
+        base_branch="main",
+        repo_url="https://github.com/test/repo.git",
+        images={
+            ContainerRole.DEVELOPER: "dev:latest",
+            ContainerRole.EVALUATOR: "eval:latest",
+            ContainerRole.QA: "qa:latest",
+        }
+    )

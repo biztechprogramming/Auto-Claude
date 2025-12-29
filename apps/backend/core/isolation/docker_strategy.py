@@ -103,6 +103,8 @@ class DockerIsolationStrategy(IsolationStrategy):
         # Detect base branch if not provided
         if not base_branch:
             base_branch = self._detect_base_branch()
+            # Update the base class attribute since we detected it after calling super().__init__
+            self.base_branch = base_branch
         print(f"[DockerStrategy] base_branch={base_branch}, type={type(base_branch)}")
 
         # Log all values before creating orchestrator

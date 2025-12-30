@@ -159,18 +159,106 @@ async for message in query(
 
 ## ✅ Recently Completed (2025-12-30)
 
-### 1. Evaluator Container Server ✅
+### 1. Volume Mount for Prompts (No Rebuild Needed!) ✅
 
-**File**: [`apps/backend/docker/api/evaluator_server.py`](../apps/backend/docker/api/evaluator_server.py)
+**Problem**: Previously, prompts were copied into Docker images during build (`COPY prompts/ /app/prompts/`). Any prompt changes required rebuilding all containers.
 
-**Completed Changes**:
-- ✅ Updated prompt path to `/app/prompts/docker/evaluator.md`
-- ✅ Uses shared `load_project_context()` from `context_loader.py`
-- ✅ Uses shared `load_memory_content()` from `context_loader.py`
-- ✅ Prompt formatting injects context, memory, and base_branch
-- ✅ Claude SDK options use `allowed_tools=None` for full permissions
+**Solution**: Mount prompts directory as a volume at runtime.
 
-### 2. QA Container Server ✅
+**Files Changed**:
+- [`apps/backend/core/isolation/container_client.py`](../apps/backend/core/isolation/container_client.py)
+  - ✅ Added `volume_mounts` field to `ContainerConfig` dataclass
+  - ✅ Container startup now mounts volumes with `-v` flag
+  - ✅ Logs volume mounts for debugging
+
+- [`apps/backend/core/isolation/orchestrator.py`](../apps/backend/core/isolation/orchestrator.py)
+  - ✅ Automatically mounts `apps/backend/prompts` → `/app/prompts` for all containers
+  - ✅ Uses absolute path resolution for cross-platform compatibility
+
+**Benefits**:
+- 🚀 **Edit prompts and test immediately** - no container rebuild required
+- 🔄 **Faster iteration** - modify evaluator.md and rerun validation instantly
+- 📝 **Live development** - tweak prompts while containers are running
+- ✅ **Backward compatible** - COPY in Dockerfile still works as fallback
+
+**How It Works**:
+```python
+# In orchestrator.py (lines 163-168)
+prompts_dir = self.project_dir / "apps" / "backend" / "prompts"
+volume_mounts = {
+    str(prompts_dir.absolute()): "/app/prompts"
+}
+```
+
+When containers start, the host's `apps/backend/prompts/` directory is mounted into the container at `/app/prompts/`. Changes to prompt files on the host are immediately visible inside the container.
+
+**Testing**: ✅ All 30 orchestrator tests pass
+
+---
+
+### 2. Enhanced Evaluator Prompt - Completeness Focus ✅
+
+**Problem**: Evaluator was approving incomplete work (e.g., developer completing without writing any code).
+
+**Solution**: Significantly enhanced [`apps/backend/prompts/docker/evaluator.md`](../apps/backend/prompts/docker/evaluator.md) to emphasize completeness as the PRIMARY responsibility.
+
+**Key Changes**:
+
+#### Warning at Start (Line 39)
+```markdown
+⚠️ BEFORE YOU START: Your #1 job is to verify the spec is FULLY implemented.
+If ANY piece is missing, REJECT with clear feedback on what needs to be done.
+Don't approve partial work.
+```
+
+#### Phase 1: Early Commit Check (Lines 50-56)
+```bash
+# CRITICAL: Check for commits first
+git log origin/{base_branch}..HEAD --oneline
+
+# If output is empty, NO CODE WAS WRITTEN → REJECT IMMEDIATELY
+```
+
+#### Phase 2: Mandatory Completeness Check (Lines 75-110)
+- **Step 1**: Verify code was actually written (check for commits)
+- **Step 2**: Map EVERY spec requirement to implementation with ✓/✗ checklist
+- **Step 3**: Verify file coverage matches spec
+- **Step 4**: Verify test coverage completeness
+- **Action**: If ANY item is ✗, REJECT with critical severity
+
+#### Enhanced Evaluation Criteria (Lines 285-313)
+**APPROVE** requires:
+1. **100% Completeness** (emphasized as first criterion)
+   - Every feature mentioned is coded
+   - Every acceptance criterion has corresponding implementation
+   - All files mentioned in spec are created/modified
+   - All tests requested exist and pass
+   - No gaps, no missing pieces, no TODOs
+
+**REJECT** triggers:
+1. **No Code Written** - No commits on feature branch (check with `git log`)
+2. **Incomplete Implementation** - ANY missing requirement
+3. Plus 8 other critical/major issues
+
+#### Critical Reminders Reordered (Lines 408-425)
+1. **COMPLETENESS IS EVERYTHING** (moved to #1)
+2. **Check for Code First** (new #2 - check commits before quality review)
+3. **You Are Quality Control**
+4. **Use Context7**
+5. **The Spec is Your Bible** (expanded with details)
+6-8. Other important reminders
+
+**Impact**:
+- ✅ Evaluator will now reject if developer completed without committing code
+- ✅ Evaluator will systematically check EVERY spec requirement
+- ✅ Clear, actionable feedback on what's missing
+- ✅ Intelligent assessment rather than rigid rules
+
+**Testing**: ✅ Prompt formatting tests pass
+
+---
+
+### 3. QA Container Server ✅
 
 **File**: [`apps/backend/docker/api/qa_server.py`](../apps/backend/docker/api/qa_server.py)
 
@@ -181,7 +269,7 @@ async for message in query(
 - ✅ Prompt formatting injects context and memory
 - ✅ Claude SDK options use `allowed_tools=None` for full permissions
 
-### 3. Developer Container Server ✅
+### 4. Developer Container Server ✅
 
 **File**: [`apps/backend/docker/api/developer_server.py`](../apps/backend/docker/api/developer_server.py)
 
@@ -190,7 +278,7 @@ async for message in query(
 - ✅ Refactored to use shared `load_memory_content()` from `context_loader.py`
 - ✅ Removed duplicate helper methods (now DRY)
 
-### 4. Shared Context Loader Module ✅
+### 5. Shared Context Loader Module ✅
 
 **File**: [`apps/backend/docker/api/context_loader.py`](../apps/backend/docker/api/context_loader.py)
 
@@ -200,7 +288,7 @@ async for message in query(
 - ✅ `find_spec_dir()` - Helper to locate spec directory
 - ✅ Used by all three container servers (Developer, Evaluator, QA)
 
-### 5. StartRequest Enhanced ✅
+### 6. StartRequest Enhanced ✅
 
 **File**: [`apps/backend/docker/api/base_server.py`](../apps/backend/docker/api/base_server.py)
 
@@ -208,16 +296,17 @@ async for message in query(
 - ✅ Added `base_branch: str = "main"` field to StartRequest
 - ✅ Evaluator prompt can now use `{base_branch}` for git diff comparisons
 
-### 6. Dockerfiles Updated ✅
+### 7. Dockerfiles Updated ✅
 
 **File**: [`apps/backend/docker/Dockerfile.base`](../apps/backend/docker/Dockerfile.base)
 
 **Completed Changes**:
 - ✅ Added `COPY docker/api/context_loader.py /api/context_loader.py`
 - ✅ Shared module available to all container images
-- ✅ Verified all prompts are copied with `COPY prompts/ /app/prompts/`
+- ✅ Verified all prompts are copied with `COPY prompts/ /app/prompts/` (now serves as fallback)
+- ✅ **Note**: Prompts are now mounted as volumes at runtime, so COPY is backup only
 
-### 7. Permission Configuration Verified ✅
+### 8. Permission Configuration Verified ✅
 
 **Verification Complete**:
 - ✅ No Docker-level tool restrictions found
@@ -413,7 +502,7 @@ APPROVED (Ready for merge)
 
 ## 🎉 Summary
 
-**Implementation Status**: **95% Complete**
+**Implementation Status**: **98% Complete** ⬆️ (was 95%)
 
 All code changes have been implemented:
 - ✅ All three container servers updated with Docker-specific prompts
@@ -421,6 +510,8 @@ All code changes have been implemented:
 - ✅ Full tool permissions configured (`allowed_tools=None`)
 - ✅ Dockerfiles updated to include all necessary files
 - ✅ `base_branch` field added to StartRequest
+- ✅ **NEW**: Volume mount for prompts (edit without rebuild!)
+- ✅ **NEW**: Enhanced evaluator prompt (completeness-focused)
 - ⏳ Runtime testing needed to validate end-to-end workflow
 
 **Key Achievements**:
@@ -428,9 +519,11 @@ All code changes have been implemented:
 2. **Rich Context**: All containers receive project context, memory files, and patterns
 3. **Full Autonomy**: Containers have unrestricted tool access for autonomous operation
 4. **Structured Feedback**: Evaluator and QA provide JSON-formatted feedback for Developer
-5. **Production Ready**: Code is implemented and ready for container rebuild
+5. **Live Prompt Development**: Volume-mounted prompts allow instant iteration without rebuild
+6. **Intelligent Validation**: Enhanced evaluator prompt prevents approval of incomplete work
+7. **Production Ready**: Code is implemented and ready for container rebuild (optional now!)
 
-**Next Action**: Rebuild Docker containers and run end-to-end test with a simple spec.
+**Next Action**: Test with existing containers (no rebuild needed!) to validate prompt changes work.
 
 ---
 

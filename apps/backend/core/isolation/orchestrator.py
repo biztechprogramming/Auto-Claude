@@ -160,11 +160,22 @@ class DockerOrchestrator:
         container_name = self._get_container_name(spec_name, role)
         env_vars = self._get_base_env_vars()
 
+        # Mount prompts directory as read-only volume
+        # This allows prompt changes without rebuilding containers
+        # Note: prompts are in Auto-Claude installation, not target project
+        # Use __file__ to locate the Auto-Claude backend directory
+        backend_dir = Path(__file__).parent.parent.parent  # core/isolation/ -> core/ -> apps/backend/
+        prompts_dir = backend_dir / "prompts"
+        volume_mounts = {
+            str(prompts_dir.absolute()): "/app/prompts"
+        }
+
         config = ClientConfig(
             name=container_name,
             image=self.images[role],
             port=port,
-            env_vars=env_vars
+            env_vars=env_vars,
+            volume_mounts=volume_mounts
         )
 
         # Create client

@@ -25,6 +25,7 @@ class ContainerConfig:
     image: str
     port: int
     env_vars: dict
+    volume_mounts: Optional[dict[str, str]] = None  # host_path -> container_path mapping
 
 
 class ContainerClient:
@@ -60,6 +61,12 @@ class ContainerClient:
             "--name", self.config.name,
             "-p", f"{self.config.port}:{self.config.port}",
         ]
+
+        # Add volume mounts if specified
+        if self.config.volume_mounts:
+            for host_path, container_path in self.config.volume_mounts.items():
+                cmd.extend(["-v", f"{host_path}:{container_path}"])
+                logger.info(f"Mounting volume: {host_path} -> {container_path}")
 
         # Add environment variables
         for key, value in self.config.env_vars.items():

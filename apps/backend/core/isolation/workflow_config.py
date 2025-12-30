@@ -47,6 +47,7 @@ class WorkflowStep:
 
 # Default Docker Pipeline Workflow
 # This is the standard 3-step pipeline: Developer → Evaluator → QA
+# Each step uses Docker-specific prompts from prompts/docker/ folder
 DEFAULT_WORKFLOW = [
     WorkflowStep(
         name="coding",
@@ -54,7 +55,7 @@ DEFAULT_WORKFLOW = [
         log_phase="coding",
         port=8001,
         description="Implement code changes",
-        prompt_file="coder.md",
+        prompt_file="docker/developer.md",
         skip_if_complete=True,
         accepts_feedback=True,
         kanban_status="coding",
@@ -66,7 +67,7 @@ DEFAULT_WORKFLOW = [
         log_phase="validation",
         port=8002,
         description="Review code quality",
-        prompt_file="qa_reviewer.md",
+        prompt_file="docker/evaluator.md",
         skip_if_complete=True,
         accepts_feedback=False,
         kanban_status="ai_review",
@@ -78,7 +79,7 @@ DEFAULT_WORKFLOW = [
         log_phase="testing",
         port=8003,
         description="Run automated tests",
-        prompt_file="qa_reviewer.md",  # TODO: Create dedicated test prompt
+        prompt_file="docker/qa.md",
         skip_if_complete=True,
         accepts_feedback=False,
         kanban_status="ai_testing",
@@ -129,5 +130,22 @@ def get_step_by_role(role: ContainerRole) -> Optional[WorkflowStep]:
     workflow = get_workflow()
     for step in workflow:
         if step.role == role:
+            return step
+    return None
+
+
+def get_step_by_name(name: str) -> Optional[WorkflowStep]:
+    """
+    Get workflow step by step name.
+
+    Args:
+        name: Step name (e.g., "coding", "code_review", "testing")
+
+    Returns:
+        WorkflowStep if found, None otherwise
+    """
+    workflow = get_workflow()
+    for step in workflow:
+        if step.name == name:
             return step
     return None

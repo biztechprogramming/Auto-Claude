@@ -237,32 +237,6 @@ class DockerIsolationStrategy(IsolationStrategy):
             return existing
         return self.create_environment(spec_name)
 
-    def _is_phase_complete(self, spec_name: str, phase: str) -> bool:
-        """
-        Check if a phase is already completed by reading task_logs.json.
-
-        Args:
-            spec_name: The spec name
-            phase: The phase name (coding, validation, testing)
-
-        Returns:
-            True if phase is marked as completed
-        """
-        import json
-        log_file = self.project_dir / ".auto-claude" / "specs" / spec_name / "task_logs.json"
-
-        if not log_file.exists():
-            return False
-
-        try:
-            with open(log_file, 'r') as f:
-                logs = json.load(f)
-
-            phase_status = logs.get("phases", {}).get(phase, {}).get("status")
-            return phase_status == "completed"
-        except Exception:
-            return False
-
     async def run_pipeline(
         self,
         spec_name: str,
@@ -275,13 +249,19 @@ class DockerIsolationStrategy(IsolationStrategy):
         The workflow is defined in workflow_config.py and can be customized.
         Each step runs in sequence, with feedback loops for steps that accept feedback.
 
-        State machine implementation following DOCKER_WORKFLOW_DESIGN.md:
+        State machine implementation using WorkflowStepState:
         - PENDING → ACTIVE → COMPLETED → [Next Step]
         - PENDING → ACTIVE → FAILED → [Retry if accepts_feedback] → ACTIVE
-        - PENDING → SKIPPED → [Next Step] (if skip_if_complete=true and already done)
+        - PENDING → SKIPPED → [Next Step] (if already completed)
         """
         from core.isolation.workflow_config import get_workflow
+        from core.isolation.workflow_state import (
+            create_workflow_states,
+            StepStatus,
+            all_steps_complete,
+        )
         from core.task_log_writer import TaskLogWriter
+        import json
 
         env_info = self.get_or_create_environment(spec_name)
         branch_name = env_info.branch_name
@@ -291,8 +271,14 @@ class DockerIsolationStrategy(IsolationStrategy):
         spec_dir.mkdir(parents=True, exist_ok=True)
         log_writer = TaskLogWriter(spec_dir)
 
-        # Get workflow steps
-        workflow = get_workflow()
+        # Create workflow states from configuration
+        workflow_steps = get_workflow()
+        workflow_states = create_workflow_states(workflow_steps)
+
+        # Check if any steps are already completed (from previous runs)
+        for step_state in workflow_states:
+            if step_state.config.skip_if_complete and log_writer.is_phase_complete(step_state.log_phase):
+                step_state.skip()
 
         accumulated_comments: list[FeedbackComment] = []
         iteration = 0
@@ -313,61 +299,57 @@ class DockerIsolationStrategy(IsolationStrategy):
         log_writer.mark_phase_complete("planning", success=True)
         log_writer.add_log_entry("planning", "Implementation plan ready", "info")
 
+        # Main iteration loop
         while iteration < self.max_feedback_iterations:
             iteration += 1
             log_writer.set_iteration(iteration)
 
             # Execute each step in the workflow
-            results = {}
-
-            for step in workflow:
-                # Update current step in workflow state
-                log_writer.set_current_step(step.name)
-
-                # Check if step should be skipped (first iteration only)
-                if iteration == 1 and step.skip_if_complete and log_writer.is_phase_complete(step.log_phase):
-                    if on_status_change:
-                        on_status_change(spec_name, step.kanban_status, f"{step.description} - already completed, skipping")
-
-                    log_writer.add_log_entry(step.log_phase, f"Skipping {step.description} (already completed)", "info")
-
-                    # Create mock success result
-                    results[step.name] = ContainerResult(
-                        role=step.role,
-                        success=True,
-                        exit_code=0,
-                        output=f"{step.log_phase} phase already completed",
-                        commit_sha=None,
-                    )
+            for step_state in workflow_states:
+                # Skip if already completed
+                if step_state.is_complete:
+                    if step_state.status == StepStatus.SKIPPED and iteration == 1:
+                        # Only log skipping on first iteration
+                        if on_status_change:
+                            on_status_change(
+                                spec_name,
+                                step_state.config.kanban_status,
+                                f"{step_state.description} - already completed, skipping"
+                            )
+                        log_writer.add_log_entry(
+                            step_state.log_phase,
+                            f"Skipping {step_state.description} (already completed)",
+                            "info"
+                        )
                     continue
 
-                # DO NOT set workflow status here - wait until step succeeds!
-                # (Setting it here makes the next step appear as "running" while current step is still active)
+                # Start the step
+                step_state.start(iteration)
+                log_writer.set_current_step(step_state.name)
 
-                # Update status for UI (but not workflow status yet)
+                # Update status for UI
                 if on_status_change:
                     if iteration == 1:
-                        on_status_change(spec_name, step.kanban_status, step.description)
+                        on_status_change(spec_name, step_state.config.kanban_status, step_state.description)
                     else:
                         on_status_change(
-                            spec_name, step.kanban_status,
-                            f"{step.description} (retry {iteration}/{self.max_feedback_iterations})"
+                            spec_name,
+                            step_state.config.kanban_status,
+                            f"{step_state.description} (retry {iteration}/{self.max_feedback_iterations})"
                         )
 
-                # Load the full spec content for developer container
-                spec_dir = self.project_dir / ".auto-claude" / "specs" / spec_name
+                # Load the full spec content
                 spec_file = spec_dir / "spec.md"
                 spec_content = ""
                 if spec_file.exists():
                     spec_content = spec_file.read_text(encoding="utf-8")
                 else:
                     # Fallback: use task description from template
-                    spec_content = step.task_template.format(spec_name=spec_name)
+                    spec_content = step_state.config.task_template.format(spec_name=spec_name)
 
                 # Format feedback comments as JSON string if step accepts feedback
-                import json
                 feedback_str = None
-                if step.accepts_feedback and accumulated_comments:
+                if step_state.config.accepts_feedback and accumulated_comments:
                     feedback_str = json.dumps([
                         {
                             "source": c.source.value,
@@ -381,28 +363,27 @@ class DockerIsolationStrategy(IsolationStrategy):
 
                 # Run the container step
                 result = await self._orchestrator._run_container_http(
-                    role=step.role,
+                    role=step_state.config.role,
                     spec_name=spec_name,
                     branch_name=branch_name,
                     spec_content=spec_content,
                     feedback_comments=feedback_str,
                 )
 
-                results[step.name] = result
-
                 # Handle step result
                 if not result.success:
-                    # Step failed - implement state machine transitions per design spec
+                    # Step failed
+                    step_state.fail(result.output)
 
                     # Case 1: Step accepts feedback AND we have iterations left
-                    if step.accepts_feedback and iteration < self.max_feedback_iterations:
+                    if step_state.can_retry and iteration < self.max_feedback_iterations:
                         # Collect feedback comments for next iteration
                         accumulated_comments.extend(result.comments)
 
                         # Log the failure reason
                         log_writer.add_log_entry(
-                            step.log_phase,
-                            f"{step.description} failed: {len(result.comments)} issues found",
+                            step_state.log_phase,
+                            f"{step_state.description} failed: {len(result.comments)} issues found",
                             "error"
                         )
 
@@ -412,10 +393,17 @@ class DockerIsolationStrategy(IsolationStrategy):
                         if on_status_change:
                             on_status_change(
                                 spec_name, "needs_revision",
-                                f"{step.description} failed: {len(result.comments)} issues found - will retry"
+                                f"{step_state.description} failed: {len(result.comments)} issues found - will retry"
                             )
 
-                        # Phase is already marked as failed by orchestrator
+                        # Reset all non-skipped steps to pending for retry
+                        for s in workflow_states:
+                            if s.status not in (StepStatus.SKIPPED, StepStatus.PENDING):
+                                s.status = StepStatus.PENDING
+                                s.started_at = None
+                                s.completed_at = None
+                                s.error = None
+
                         # Break inner loop to retry from beginning
                         break
 
@@ -423,8 +411,8 @@ class DockerIsolationStrategy(IsolationStrategy):
                     else:
                         # Log the permanent failure
                         log_writer.add_log_entry(
-                            step.log_phase,
-                            f"{step.description} failed permanently (no retry available)",
+                            step_state.log_phase,
+                            f"{step_state.description} failed permanently (no retry available)",
                             "error"
                         )
 
@@ -434,34 +422,36 @@ class DockerIsolationStrategy(IsolationStrategy):
                         if on_status_change:
                             on_status_change(
                                 spec_name, "failed",
-                                f"{step.description} failed - no retry available"
+                                f"{step_state.description} failed - no retry available"
                             )
 
-                        # Phase is already marked as failed by orchestrator
                         # Exit the pipeline
                         return False
 
                 # Step succeeded
                 else:
+                    step_state.complete(result.commit_sha)
+
                     # Log success
                     log_writer.add_log_entry(
-                        step.log_phase,
-                        f"✓ {step.description} completed successfully",
+                        step_state.log_phase,
+                        f"✓ {step_state.description} completed successfully",
                         "success"
                     )
 
-                    # Phase is already marked as completed by orchestrator
-                    # NOW update the workflow status (after step completes, not before it starts)
-                    log_writer.set_workflow_status(step.kanban_status)
+                    # Update the workflow status (after step completes)
+                    log_writer.set_workflow_status(step_state.config.kanban_status)
 
                     # Update UI status
                     if on_status_change:
-                        on_status_change(spec_name, step.kanban_status, f"✓ {step.description} completed")
+                        on_status_change(
+                            spec_name,
+                            step_state.config.kanban_status,
+                            f"✓ {step_state.description} completed"
+                        )
 
-            # Check if all steps succeeded
-            all_succeeded = all(r.success for r in results.values())
-
-            if all_succeeded:
+            # Check if all steps are complete
+            if all_steps_complete(workflow_states):
                 # All steps passed! Update workflow status to ready_for_review
                 log_writer.set_workflow_status("ready_for_review")
                 log_writer.set_current_step(None)  # No current step when complete
@@ -479,7 +469,7 @@ class DockerIsolationStrategy(IsolationStrategy):
                     )
                 return True
 
-            # If we got here, a step failed and we need to retry (continue loop)
+            # If we got here without all steps complete, continue to next iteration
 
         # Max iterations reached without success
         log_writer.set_workflow_status("failed")

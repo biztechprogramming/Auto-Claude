@@ -16,6 +16,7 @@
     "lint": "cd apps/frontend && npm run lint",
     "test": "cd apps/frontend && npm test",
     "test:backend": "node scripts/test-backend.js",
+    "test:e2e": "node scripts/test-e2e.js",
     "rebuild:containers": "node scripts/rebuild-containers.js",
     "package": "cd apps/frontend && npm run package",
     "package:mac": "cd apps/frontend && npm run package:mac",

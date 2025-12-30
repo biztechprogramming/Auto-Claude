@@ -92,41 +92,27 @@ class DeveloperServer(BaseContainerServer):
         logger.info("EXECUTING WITH CLAUDE SDK")
         logger.info("=" * 70)
 
-        # Load coder prompt
-        coder_prompt_file = Path("/app/prompts/coder.md")
-        logger.info(f"Looking for coder prompt at: {coder_prompt_file}")
-        if not coder_prompt_file.exists():
-            raise FileNotFoundError(f"Coder prompt not found: {coder_prompt_file}")
+        # Load Docker-specific developer prompt
+        developer_prompt_file = Path("/app/prompts/docker/developer.md")
+        logger.info(f"Looking for developer prompt at: {developer_prompt_file}")
+        if not developer_prompt_file.exists():
+            raise FileNotFoundError(f"Developer prompt not found: {developer_prompt_file}")
 
-        coder_prompt = coder_prompt_file.read_text(encoding="utf-8")
-        logger.info(f"Loaded coder prompt: {len(coder_prompt)} chars")
+        developer_prompt = developer_prompt_file.read_text(encoding="utf-8")
+        logger.info(f"Loaded developer prompt: {len(developer_prompt)} chars")
 
-        # Build the full prompt
-        full_prompt = f"""{coder_prompt}
+        # Load additional context files
+        project_context = self._load_project_context(repo_dir)
+        memory_content = self._load_memory_content(repo_dir)
 
-# Specification to Implement
-
-{request.spec_content}
-
-# Task Details
-
-- Working Directory: {repo_dir}
-- Branch: {request.branch_name}
-- Spec: {request.spec_name}
-
-"""
-
-        # Add feedback comments if any
-        if request.feedback_comments:
-            logger.info("Adding feedback comments to prompt")
-            full_prompt += f"""
-
-# Feedback from Previous Iteration
-
-{request.feedback_comments}
-
-Please address the feedback above while implementing the specification.
-"""
+        # Replace placeholders in the prompt template
+        full_prompt = developer_prompt.format(
+            branch_name=request.branch_name,
+            spec_content=request.spec_content,
+            project_context=project_context,
+            memory_content=memory_content,
+            feedback_comments=request.feedback_comments or "No feedback from previous iterations."
+        )
 
         logger.info(f"Full prompt length: {len(full_prompt)} chars")
         logger.info(f"Full prompt preview (first 500 chars):\n{full_prompt[:500]}")
@@ -149,6 +135,7 @@ Please address the feedback above while implementing the specification.
                 options=ClaudeAgentOptions(
                     # All tools available - Claude will autonomously use what it needs
                     allowed_tools=None,  # None = all tools allowed
+                    cwd=str(repo_dir),  # Set working directory to the repository
                 )
             ):
                 # Log useful information from messages
@@ -192,6 +179,117 @@ Please address the feedback above while implementing the specification.
         except Exception as e:
             logger.error(f"Claude Agent SDK session failed: {e}", exc_info=True)
             raise RuntimeError(f"Claude Agent SDK failed: {e}")
+
+    def _load_project_context(self, repo_dir: Path) -> str:
+        """Load project context files (project_index.json, context.json, requirements.json)."""
+        import json
+
+        context_parts = []
+
+        # Try to load project_index.json
+        spec_dirs = list((repo_dir / ".auto-claude" / "specs").glob("*")) if (repo_dir / ".auto-claude" / "specs").exists() else []
+        if spec_dirs:
+            # Use the most recent spec directory
+            spec_dir = max(spec_dirs, key=lambda p: p.stat().st_mtime)
+
+            # Load project_index.json
+            project_index_file = spec_dir / "project_index.json"
+            if project_index_file.exists():
+                try:
+                    project_index = json.loads(project_index_file.read_text(encoding="utf-8"))
+                    context_parts.append(f"## Project Index\n\n```json\n{json.dumps(project_index, indent=2)}\n```")
+                    logger.info(f"Loaded project index from {project_index_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to load project_index.json: {e}")
+
+            # Load context.json
+            context_file = spec_dir / "context.json"
+            if context_file.exists():
+                try:
+                    context_data = json.loads(context_file.read_text(encoding="utf-8"))
+                    context_parts.append(f"## Codebase Context\n\n```json\n{json.dumps(context_data, indent=2)}\n```")
+                    logger.info(f"Loaded context from {context_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to load context.json: {e}")
+
+            # Load requirements.json
+            requirements_file = spec_dir / "requirements.json"
+            if requirements_file.exists():
+                try:
+                    requirements_data = json.loads(requirements_file.read_text(encoding="utf-8"))
+                    context_parts.append(f"## Requirements\n\n```json\n{json.dumps(requirements_data, indent=2)}\n```")
+                    logger.info(f"Loaded requirements from {requirements_file}")
+                except Exception as e:
+                    logger.warning(f"Failed to load requirements.json: {e}")
+
+        if not context_parts:
+            return "No project context available."
+
+        return "\n\n".join(context_parts)
+
+    def _load_memory_content(self, repo_dir: Path) -> str:
+        """Load memory files (patterns, gotchas, session insights)."""
+        memory_parts = []
+
+        # Find the spec directory
+        spec_dirs = list((repo_dir / ".auto-claude" / "specs").glob("*")) if (repo_dir / ".auto-claude" / "specs").exists() else []
+        if spec_dirs:
+            spec_dir = max(spec_dirs, key=lambda p: p.stat().st_mtime)
+            memory_dir = spec_dir / "memory"
+
+            if memory_dir.exists():
+                # Load patterns.md
+                patterns_file = memory_dir / "patterns.md"
+                if patterns_file.exists():
+                    try:
+                        patterns = patterns_file.read_text(encoding="utf-8")
+                        memory_parts.append(f"## Code Patterns\n\n{patterns}")
+                        logger.info(f"Loaded patterns from {patterns_file}")
+                    except Exception as e:
+                        logger.warning(f"Failed to load patterns.md: {e}")
+
+                # Load gotchas.md
+                gotchas_file = memory_dir / "gotchas.md"
+                if gotchas_file.exists():
+                    try:
+                        gotchas = gotchas_file.read_text(encoding="utf-8")
+                        memory_parts.append(f"## Known Gotchas\n\n{gotchas}")
+                        logger.info(f"Loaded gotchas from {gotchas_file}")
+                    except Exception as e:
+                        logger.warning(f"Failed to load gotchas.md: {e}")
+
+                # Load codebase_map.json
+                codebase_map_file = memory_dir / "codebase_map.json"
+                if codebase_map_file.exists():
+                    try:
+                        import json
+                        codebase_map = json.loads(codebase_map_file.read_text(encoding="utf-8"))
+                        memory_parts.append(f"## Codebase Map\n\n```json\n{json.dumps(codebase_map, indent=2)}\n```")
+                        logger.info(f"Loaded codebase map from {codebase_map_file}")
+                    except Exception as e:
+                        logger.warning(f"Failed to load codebase_map.json: {e}")
+
+                # Load recent session insights (last 3)
+                session_insights_dir = memory_dir / "session_insights"
+                if session_insights_dir.exists():
+                    insight_files = sorted(session_insights_dir.glob("session_*.json"), reverse=True)[:3]
+                    if insight_files:
+                        import json
+                        insights_content = []
+                        for insight_file in insight_files:
+                            try:
+                                insight = json.loads(insight_file.read_text(encoding="utf-8"))
+                                insights_content.append(json.dumps(insight, indent=2))
+                            except Exception as e:
+                                logger.warning(f"Failed to load {insight_file}: {e}")
+                        if insights_content:
+                            memory_parts.append(f"## Recent Session Insights\n\n```json\n{chr(10).join(insights_content)}\n```")
+                            logger.info(f"Loaded {len(insights_content)} session insights")
+
+        if not memory_parts:
+            return "No memory files available yet (first session)."
+
+        return "\n\n".join(memory_parts)
 
     async def _execute_placeholder(self, request: StartRequest, repo_dir: Path):
         """Placeholder implementation when Claude SDK is not available."""

@@ -333,10 +333,10 @@ class TestTaskLogIntegration:
 # Fixtures
 
 @pytest.fixture
-def docker_strategy(tmp_path):
+def docker_strategy(docker_git_repo):
     """Create a Docker strategy for testing."""
     return DockerIsolationStrategy(
-        project_dir=tmp_path,
+        project_dir=docker_git_repo,
         base_branch="main",
         repo_url="https://github.com/test/repo.git",
         max_feedback_iterations=3

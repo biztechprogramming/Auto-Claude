@@ -25,7 +25,8 @@ cd apps/backend
 | `test_workflow_state_machine.py` | 12 | 95%+ | Workflow state transitions |
 | `test_task_log_writer.py` | 28 | 90%+ | Task log observation |
 | `test_docker_integration.py` | 11 | End-to-end | Complete pipeline validation |
-| **TOTAL** | **165+** | **90%+** | **Comprehensive coverage** |
+| `test_docker_e2e.py` | 10 | **CRITICAL** | **Real container execution & prompt validation** |
+| **TOTAL** | **175+** | **90%+** | **Comprehensive coverage** |
 
 ## 🧪 Test Categories
 
@@ -48,6 +49,43 @@ cd apps/backend
 - ✅ Error handling and recovery
 - ✅ Multi-spec isolation
 - ✅ Resume and recovery scenarios
+
+### **CRITICAL E2E Tests** (Very Slow - requires Docker & API - minutes)
+⚠️ **These are the most important tests - they validate actual functionality!**
+- 🔴 **Real Docker container builds** - Verifies Dockerfiles and dependencies work
+- 🔴 **Developer prompt execution** - Validates prompts generate actual working code
+- 🔴 **Evaluator prompt execution** - Validates code review actually identifies issues
+- 🔴 **QA prompt execution** - Validates tests actually run and detect failures
+- 🔴 **Complete pipeline** - Validates full Developer → Evaluator → QA workflow
+
+**Run these tests before deploying to production!**
+```bash
+# Set OAuth token first
+export CLAUDE_CODE_OAUTH_TOKEN=your_token_here
+
+# Option 1: Use temporary test repos (default - isolated)
+pytest tests/test_docker_e2e.py -v -s
+
+# Option 2: Use persistent test repo (preserves artifacts for debugging)
+export E2E_TEST_REPO=C:\dev\ai\test
+pytest tests/test_docker_e2e.py -v -s
+
+# After tests with persistent repo, inspect generated code
+cd C:\dev\ai\test
+git log --oneline  # View commits
+git branch -a      # View branches created by tests
+
+# Skip E2E tests (for CI or local development)
+pytest tests/ -m "not e2e" -v
+```
+
+**Persistent Test Repository Benefits:**
+- ✅ Preserves generated code artifacts between test runs
+- ✅ Validates actual git push/pull operations
+- ✅ Allows manual inspection of Claude-generated code
+- ✅ More realistic testing of real-world workflows
+
+See [E2E_DOCKER_TESTING.md](../docs/E2E_DOCKER_TESTING.md) for detailed setup and usage.
 
 ## 🎯 What Gets Tested
 

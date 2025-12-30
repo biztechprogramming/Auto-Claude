@@ -26,19 +26,25 @@ from apps.backend.core.isolation.docker_strategy import DockerIsolationStrategy
 from apps.backend.core.isolation.base import ContainerRole, ContainerResult, FeedbackComment
 
 
+@pytest.fixture
+def docker_test_repo(docker_git_repo):
+    """Fixture that provides a proper git repo for docker integration tests."""
+    return docker_git_repo
+
+
 @pytest.mark.slow
 @pytest.mark.asyncio
 class TestCompleteWorkflow:
     """Test complete workflow execution with complex spec."""
 
-    async def test_full_pipeline_success(self, tmp_path):
+    async def test_full_pipeline_success(self, docker_test_repo):
         """Test complete pipeline execution from start to finish."""
         # Setup
-        create_complex_spec_files(tmp_path)
+        create_complex_spec_files(docker_test_repo)
         spec = get_complex_spec()
 
         strategy = DockerIsolationStrategy(
-            project_dir=tmp_path,
+            project_dir=docker_test_repo,
             base_branch="main",
             repo_url="https://github.com/test/repo.git"
         )
@@ -61,7 +67,7 @@ class TestCompleteWorkflow:
             assert result is True
 
             # Verify task logs were created
-            log_file = tmp_path / ".auto-claude" / "specs" / COMPLEX_SPEC_NAME / "task_logs.json"
+            log_file = docker_test_repo / ".auto-claude" / "specs" / COMPLEX_SPEC_NAME / "task_logs.json"
             assert log_file.exists()
 
             logs = json.loads(log_file.read_text())
@@ -73,13 +79,13 @@ class TestCompleteWorkflow:
                 if phase != "planning":
                     assert logs["phases"][phase]["status"] == "completed"
 
-    async def test_full_pipeline_with_one_retry(self, tmp_path):
+    async def test_full_pipeline_with_one_retry(self, docker_test_repo):
         """Test pipeline with one retry iteration."""
-        create_complex_spec_files(tmp_path)
+        create_complex_spec_files(docker_test_repo)
         spec = get_complex_spec()
 
         strategy = DockerIsolationStrategy(
-            project_dir=tmp_path,
+            project_dir=docker_test_repo,
             base_branch="main",
             repo_url="https://github.com/test/repo.git"
         )
@@ -127,17 +133,17 @@ class TestCompleteWorkflow:
             assert call_count == 5  # dev, eval(fail), dev(retry), eval(pass), qa
 
             # Verify iteration count in logs
-            log_file = tmp_path / ".auto-claude" / "specs" / COMPLEX_SPEC_NAME / "task_logs.json"
+            log_file = docker_test_repo / ".auto-claude" / "specs" / COMPLEX_SPEC_NAME / "task_logs.json"
             logs = json.loads(log_file.read_text())
             assert logs["iteration"] == 2
 
-    async def test_full_pipeline_max_retries_exceeded(self, tmp_path):
+    async def test_full_pipeline_max_retries_exceeded(self, docker_test_repo):
         """Test pipeline failure after max retries."""
-        create_complex_spec_files(tmp_path)
+        create_complex_spec_files(docker_test_repo)
         spec = get_complex_spec()
 
         strategy = DockerIsolationStrategy(
-            project_dir=tmp_path,
+            project_dir=docker_test_repo,
             base_branch="main",
             repo_url="https://github.com/test/repo.git",
             max_feedback_iterations=2  # Set to 2 for faster test
@@ -162,7 +168,7 @@ class TestCompleteWorkflow:
             assert mock_run.call_count == 2  # max_feedback_iterations
 
             # Verify final status
-            log_file = tmp_path / ".auto-claude" / "specs" / COMPLEX_SPEC_NAME / "task_logs.json"
+            log_file = docker_test_repo / ".auto-claude" / "specs" / COMPLEX_SPEC_NAME / "task_logs.json"
             logs = json.loads(log_file.read_text())
             assert logs["workflow_status"] == "failed"
 
@@ -172,13 +178,13 @@ class TestCompleteWorkflow:
 class TestErrorHandlingAndRecovery:
     """Test error handling and recovery scenarios."""
 
-    async def test_container_startup_failure(self, tmp_path):
+    async def test_container_startup_failure(self, docker_test_repo):
         """Test handling of container startup failures."""
-        create_complex_spec_files(tmp_path)
+        create_complex_spec_files(docker_test_repo)
         spec = get_complex_spec()
 
         strategy = DockerIsolationStrategy(
-            project_dir=tmp_path,
+            project_dir=docker_test_repo,
             base_branch="main",
             repo_url="https://github.com/test/repo.git"
         )
@@ -194,12 +200,12 @@ class TestErrorHandlingAndRecovery:
 
             assert result is False
 
-    async def test_git_operation_failure(self, tmp_path):
+    async def test_git_operation_failure(self, docker_test_repo):
         """Test handling of git operation failures."""
-        create_complex_spec_files(tmp_path)
+        create_complex_spec_files(docker_test_repo)
 
         strategy = DockerIsolationStrategy(
-            project_dir=tmp_path,
+            project_dir=docker_test_repo,
             base_branch="main",
             repo_url="https://github.com/test/repo.git"
         )
@@ -213,14 +219,14 @@ class TestErrorHandlingAndRecovery:
             # Should still create environment info even if git fails
             assert env_info is not None
 
-    async def test_spec_file_missing(self, tmp_path):
+    async def test_spec_file_missing(self, docker_test_repo):
         """Test handling when spec file is missing."""
         # Don't create spec files
-        spec_dir = tmp_path / ".auto-claude" / "specs" / "missing-spec"
+        spec_dir = docker_test_repo / ".auto-claude" / "specs" / "missing-spec"
         spec_dir.mkdir(parents=True, exist_ok=True)
 
         strategy = DockerIsolationStrategy(
-            project_dir=tmp_path,
+            project_dir=docker_test_repo,
             base_branch="main",
             repo_url="https://github.com/test/repo.git"
         )
@@ -244,12 +250,12 @@ class TestErrorHandlingAndRecovery:
 class TestEnvironmentLifecycle:
     """Test complete environment lifecycle."""
 
-    def test_create_use_merge_workflow(self, tmp_path):
+    def test_create_use_merge_workflow(self, docker_test_repo):
         """Test full lifecycle: create → use → merge → cleanup."""
-        create_complex_spec_files(tmp_path)
+        create_complex_spec_files(docker_test_repo)
 
         strategy = DockerIsolationStrategy(
-            project_dir=tmp_path,
+            project_dir=docker_test_repo,
             base_branch="main",
             repo_url="https://github.com/test/repo.git"
         )
@@ -282,10 +288,10 @@ class TestEnvironmentLifecycle:
 class TestMultiSpecIsolation:
     """Test multiple specs can run isolated from each other."""
 
-    def test_multiple_specs_isolated(self, tmp_path):
+    def test_multiple_specs_isolated(self, docker_test_repo):
         """Test multiple specs have isolated environments."""
         strategy = DockerIsolationStrategy(
-            project_dir=tmp_path,
+            project_dir=docker_test_repo,
             base_branch="main",
             repo_url="https://github.com/test/repo.git"
         )
@@ -319,13 +325,13 @@ class TestStatusTracking:
     """Test status tracking throughout workflow."""
 
     @pytest.mark.asyncio
-    async def test_status_updates_during_execution(self, tmp_path):
+    async def test_status_updates_during_execution(self, docker_test_repo):
         """Test status updates are tracked correctly during execution."""
-        create_complex_spec_files(tmp_path)
+        create_complex_spec_files(docker_test_repo)
         spec = get_complex_spec()
 
         strategy = DockerIsolationStrategy(
-            project_dir=tmp_path,
+            project_dir=docker_test_repo,
             base_branch="main",
             repo_url="https://github.com/test/repo.git"
         )
@@ -367,20 +373,20 @@ class TestResumeAndRecovery:
     """Test resume and recovery capabilities."""
 
     @pytest.mark.asyncio
-    async def test_resume_after_partial_completion(self, tmp_path):
+    async def test_resume_after_partial_completion(self, docker_test_repo):
         """Test resuming pipeline after some phases are complete."""
-        create_complex_spec_files(tmp_path)
+        create_complex_spec_files(docker_test_repo)
         spec = get_complex_spec()
 
         strategy = DockerIsolationStrategy(
-            project_dir=tmp_path,
+            project_dir=docker_test_repo,
             base_branch="main",
             repo_url="https://github.com/test/repo.git"
         )
 
         # Mark coding phase as complete
         from apps.backend.core.task_log_writer import TaskLogWriter
-        spec_dir = tmp_path / ".auto-claude" / "specs" / COMPLEX_SPEC_NAME
+        spec_dir = docker_test_repo / ".auto-claude" / "specs" / COMPLEX_SPEC_NAME
         log_writer = TaskLogWriter(spec_dir)
         log_writer.mark_phase_complete("coding", success=True)
 

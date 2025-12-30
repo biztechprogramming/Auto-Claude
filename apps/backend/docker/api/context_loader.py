@@ -8,9 +8,30 @@ supporting data that Docker container agents need for autonomous operation.
 import json
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
+
+
+def safe_format_prompt(template: str, **kwargs) -> str:
+    """
+    Safely format a prompt template by replacing placeholders.
+
+    Uses simple string replacement instead of str.format() to avoid issues
+    with literal curly braces in code examples, JSON, etc.
+
+    Args:
+        template: The prompt template string
+        **kwargs: Key-value pairs for placeholder replacement
+
+    Returns:
+        Formatted prompt with all placeholders replaced
+    """
+    result = template
+    for key, value in kwargs.items():
+        placeholder = f"{{{key}}}"
+        result = result.replace(placeholder, str(value))
+    return result
 
 
 def load_project_context(repo_dir: Path) -> str:

@@ -10,7 +10,7 @@ from pathlib import Path
 from datetime import datetime
 
 from base_server import BaseContainerServer, StartRequest, TaskStatus, create_start_endpoint
-from context_loader import load_project_context, load_memory_content
+from context_loader import load_project_context, load_memory_content, safe_format_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +91,9 @@ class QAServer(BaseContainerServer):
         project_context = load_project_context(repo_dir)
         memory_content = load_memory_content(repo_dir)
 
-        # Replace placeholders in the prompt template
-        full_prompt = qa_prompt.format(
+        # Replace placeholders in the prompt template using safe formatting
+        full_prompt = safe_format_prompt(
+            qa_prompt,
             branch_name=request.branch_name,
             spec_content=request.spec_content,
             project_context=project_context,

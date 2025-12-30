@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 # Check for Claude Agent SDK
 try:
-    from claude_agent_sdk import query, ClaudeAgentOptions
+    from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
     CLAUDE_SDK_AVAILABLE = True
     logger.info("Claude Agent SDK loaded successfully")
 except ImportError as e:
@@ -127,52 +127,61 @@ class DeveloperServer(BaseContainerServer):
         logger.info("=" * 70)
         logger.info("STARTING CLAUDE AGENT SDK SESSION")
         logger.info(f"Working directory: {repo_dir}")
+        logger.info(f"Working directory (absolute): {repo_dir.resolve()}")
         logger.info("=" * 70)
 
-        # Use Claude Agent SDK query function
-        # It returns an async generator that yields messages
+        # MCP servers for documentation lookup
+        mcp_servers = {
+            "context7": {"command": "npx", "args": ["-y", "@upstash/context7-mcp"]},
+        }
+
+        # Create Claude SDK client with proper configuration
+        # This matches the pattern used in the working non-Docker version
+        client = ClaudeSDKClient(
+            options=ClaudeAgentOptions(
+                model="claude-3-7-sonnet-20250219",
+                system_prompt=full_prompt,
+                allowed_tools=["Read", "Write", "Edit", "Glob", "Grep", "Bash", "NotebookEdit"],
+                mcp_servers=mcp_servers,
+                max_turns=100,
+                cwd=str(repo_dir.resolve()),  # Use absolute path for clarity
+                permission_mode="acceptEdits",  # Auto-approve edits
+            )
+        )
+
+        logger.info(f"Claude SDK Client created with cwd: {repo_dir.resolve()}")
+        logger.info(f"Allowed tools: {client.options.allowed_tools}")
+
+        # Use the client in a context manager (proper pattern)
         try:
-            async for message in query(
-                prompt=full_prompt,
-                options=ClaudeAgentOptions(
-                    # All tools available - Claude will autonomously use what it needs
-                    allowed_tools=None,  # None = all tools allowed
-                    cwd=str(repo_dir),  # Set working directory to the repository
+            async with client:
+                logger.info("Connected to Claude SDK")
+
+                # Send the initial implementation request
+                await client.query(
+                    "Please implement the feature described in the specification. "
+                    "Follow the Docker Developer Container workflow from the prompt."
                 )
-            ):
-                # Log useful information from messages
-                msg_type = getattr(message, 'type', 'unknown')
 
-                if msg_type == 'text':
-                    # Text content from Claude
-                    text = getattr(message, 'text', '')
-                    if text:
-                        logger.info(f"[Claude] {text[:200]}")  # First 200 chars
+                # Receive and log responses
+                message_count = 0
+                async for message in client.receive_response():
+                    message_count += 1
+                    msg_type = type(message).__name__
 
-                elif msg_type == 'tool_use':
-                    # Claude is using a tool
-                    tool_name = getattr(message, 'name', 'unknown')
-                    logger.info(f"[Tool Use] {tool_name}")
+                    # Log message details
+                    if hasattr(message, 'content'):
+                        for block in message.content:
+                            block_type = type(block).__name__
 
-                elif msg_type == 'tool_result':
-                    # Tool execution result
-                    tool_name = getattr(message, 'tool_name', 'unknown')
-                    logger.info(f"[Tool Result] {tool_name} completed")
-
-                elif hasattr(message, 'content'):
-                    # Generic content message
-                    content = message.content
-                    if isinstance(content, list) and len(content) > 0:
-                        first_item = content[0]
-                        if hasattr(first_item, 'type'):
-                            if first_item.type == 'text':
-                                text = getattr(first_item, 'text', '')[:200]
+                            if block_type == "TextBlock":
+                                text = getattr(block, 'text', '')[:200]
                                 logger.info(f"[Claude] {text}")
-                            elif first_item.type == 'tool_use':
-                                tool_name = getattr(first_item, 'name', 'unknown')
+                            elif block_type == "ToolUseBlock":
+                                tool_name = getattr(block, 'name', 'unknown')
                                 logger.info(f"[Tool Use] {tool_name}")
-                    else:
-                        logger.info(f"[Message] type={msg_type}")
+
+                logger.info(f"Session completed with {message_count} messages")
 
             logger.info("=" * 70)
             logger.info("CLAUDE AGENT SDK SESSION COMPLETED SUCCESSFULLY")

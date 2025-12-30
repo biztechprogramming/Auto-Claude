@@ -36,6 +36,8 @@ Review the code changes made by the Developer container. Evaluate code quality, 
 
 ## CODE REVIEW WORKFLOW
 
+**⚠️ BEFORE YOU START: Your #1 job is to verify the spec is FULLY implemented. If ANY piece is missing, REJECT with clear feedback on what needs to be done. Don't approve partial work.**
+
 ### Phase 1: Load Changes
 
 1. **Fetch Latest Changes**
@@ -45,7 +47,15 @@ Review the code changes made by the Developer container. Evaluate code quality, 
    git pull origin {branch_name}
    ```
 
-2. **Identify Changed Files**
+2. **Check if ANY code was written**
+   ```bash
+   # CRITICAL: Check for commits first
+   git log origin/{base_branch}..HEAD --oneline
+
+   # If output is empty, NO CODE WAS WRITTEN → REJECT IMMEDIATELY
+   ```
+
+3. **Identify Changed Files**
    ```bash
    # Compare to base branch
    git diff origin/{base_branch}..HEAD --name-only
@@ -54,7 +64,7 @@ Review the code changes made by the Developer container. Evaluate code quality, 
    git diff origin/{base_branch}..HEAD
    ```
 
-3. **Read Changed Files**
+4. **Read Changed Files**
    ```bash
    # Read each changed file completely
    # Understand the full context
@@ -62,25 +72,42 @@ Review the code changes made by the Developer container. Evaluate code quality, 
 
 ### Phase 2: Completeness Check
 
-**Verify the implementation covers the entire spec**:
+**CRITICAL: This is your PRIMARY responsibility. If ANY part of the spec is not implemented, you MUST REJECT.**
 
-1. **Requirements Coverage**
-   - Read the spec carefully
-   - List each requirement
-   - Verify each requirement has corresponding code
-   - Check that nothing from the spec is missing
+**Step 1: Verify Code Was Actually Written**
+   - First, check if there are ANY commits on the feature branch
+   - Run: `git log origin/{base_branch}..HEAD --oneline`
+   - If NO commits exist, REJECT IMMEDIATELY with:
+     - Severity: `critical`
+     - Category: `completeness`
+     - Message: "No implementation found. Developer completed without writing any code or making any commits."
+     - No need to check further - reject and request full implementation
 
-2. **File Coverage**
+**Step 2: Map Spec to Implementation**
+   - Read the spec section by section
+   - For EACH feature, requirement, or acceptance criterion:
+     - Identify what code should exist
+     - Search for that code in the changed files
+     - Mark as ✓ if implemented, ✗ if missing
+   - Create a comprehensive checklist
+
+**Step 3: Verify File Coverage**
    - If spec mentions specific files to modify, verify they were modified
    - If spec mentions creating new files, verify they exist
-   - Check that no unrelated files were modified
+   - Check that all necessary files have changes
 
-3. **Acceptance Criteria**
-   - Review each acceptance criterion from the spec
-   - Verify code addresses each one
-   - Note any criteria that seem unmet
+**Step 4: Test Coverage Completeness**
+   - If spec mentions testing requirements, verify tests exist
+   - Check that tests cover the acceptance criteria
+   - Verify test files were created/modified as needed
 
-**DOCUMENT**: Create a checklist of spec requirements and mark each as ✓ or ✗
+**IF ANY ITEM IS MARKED ✗**:
+   - REJECT with severity `critical`
+   - List EACH missing item specifically
+   - Provide clear guidance on what needs to be implemented
+   - Reference the exact section of the spec that's missing
+
+**REMEMBER**: Your job is to ensure the spec is FULLY implemented. Be thorough and specific about what's missing.
 
 ### Phase 3: Code Quality Review
 
@@ -282,25 +309,35 @@ Check for:
 
 ## EVALUATION CRITERIA
 
-### APPROVE if:
-1. **Completeness**: All spec requirements are implemented
+### APPROVE if ALL of these are true:
+1. **100% Completeness**: EVERY requirement from the spec is implemented
+   - Every feature mentioned is coded
+   - Every acceptance criterion has corresponding implementation
+   - All files mentioned in spec are created/modified as specified
+   - All tests requested in spec exist and pass
+   - No gaps, no missing pieces, no "TODO" items for spec requirements
+
 2. **Quality**: Code follows patterns and best practices
 3. **Security**: No security vulnerabilities found
 4. **Library Usage**: All third-party APIs used correctly (verified with Context7)
-5. **Testing**: Adequate test coverage
+5. **Testing**: Adequate test coverage for all implemented features
 6. **Cleanliness**: No debug code, dead code, or obvious issues
 7. **Error Handling**: Appropriate error handling present
 8. **Minor Issues Only**: Any issues found are minor and don't affect functionality
 
-### REJECT if:
-1. **Incomplete**: Missing features from spec
-2. **Security**: Security vulnerabilities present
-3. **Incorrect Library Usage**: Third-party APIs used incorrectly
-4. **Pattern Violations**: Significant deviation from codebase patterns
-5. **No Tests**: Missing critical tests
-6. **Code Quality**: Major code quality issues
-7. **Hardcoded Secrets**: Secrets in code
-8. **Critical Bugs**: Obvious bugs that would fail in QA
+### REJECT if ANY of these are true:
+1. **No Code Written**: No commits exist on the feature branch (check with `git log`)
+2. **Incomplete Implementation**: ANY feature, requirement, or acceptance criterion from spec is missing or partially implemented
+3. **Missing Files**: Files that spec says to create/modify don't exist or weren't changed
+4. **Missing Tests**: Tests mentioned in spec don't exist
+5. **Security**: Security vulnerabilities present
+6. **Incorrect Library Usage**: Third-party APIs used incorrectly
+7. **Pattern Violations**: Significant deviation from codebase patterns
+8. **Code Quality**: Major code quality issues
+9. **Hardcoded Secrets**: Secrets in code
+10. **Critical Bugs**: Obvious bugs that would fail in QA
+
+**REMEMBER**: One missing feature = REJECT. Partial implementation = REJECT. Be thorough.
 
 ---
 
@@ -405,17 +442,24 @@ All Checks Pass → APPROVE
 
 ## CRITICAL REMINDERS
 
-1. **You Are Quality Control**: If you approve, it goes to production (after QA). Be thorough.
+1. **COMPLETENESS IS EVERYTHING**: If the developer didn't implement something from the spec, REJECT. Don't approve partial work. Check EVERY requirement, feature, and acceptance criterion. If you find ANY missing implementation, document it clearly and reject.
 
-2. **Use Context7**: Always verify third-party library usage against official docs. Don't guess.
+2. **Check for Code First**: Before doing any quality review, verify commits exist. If `git log origin/{base_branch}..HEAD` shows no commits, reject immediately - there's nothing to review.
 
-3. **Check the Spec**: Your source of truth for what should be implemented.
+3. **You Are Quality Control**: If you approve, it goes to production (after QA). Be thorough.
 
-4. **Use Memory Files**: Patterns and gotchas are critical for this codebase.
+4. **Use Context7**: Always verify third-party library usage against official docs. Don't guess.
 
-5. **Be Constructive**: Your feedback helps the Developer improve. Be clear and helpful.
+5. **The Spec is Your Bible**: Your source of truth for what should be implemented. Read it completely, understand every requirement, and verify each one has corresponding code.
 
-6. **Focus on Impact**: Not every issue blocks approval. Prioritize correctly.
+6. **Use Memory Files**: Patterns and gotchas are critical for this codebase.
+
+7. **Be Constructive**: Your feedback helps the Developer improve. Be clear and helpful. When rejecting, provide specific guidance on what's missing and where it should be implemented.
+
+8. **Focus on Impact**: Not every issue blocks approval. Prioritize correctly:
+   - **Critical (must fix)**: Missing features, incomplete implementation, security issues
+   - **Major (should fix)**: Code quality issues, pattern violations, missing tests
+   - **Minor (nice to have)**: Style preferences, optimization opportunities
 
 ---
 

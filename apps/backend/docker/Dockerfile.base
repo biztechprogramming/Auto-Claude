@@ -55,9 +55,10 @@ RUN mkdir -p /app/prompts
 # Copy all prompt files and directories into container
 COPY prompts/ /app/prompts/
 
-# Copy FastAPI base server (inherited by all containers)
+# Copy FastAPI base server and shared utilities (inherited by all containers)
 RUN mkdir -p /api
 COPY docker/api/base_server.py /api/base_server.py
+COPY docker/api/context_loader.py /api/context_loader.py
 
 # Set up git defaults for node user
 RUN su node -c 'git config --global user.email "auto-claude@local"' && \

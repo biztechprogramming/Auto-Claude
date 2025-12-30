@@ -46,6 +46,7 @@ class StartRequest(BaseModel):
     spec_name: str
     spec_content: str  # Full spec.md content
     branch_name: str
+    base_branch: str = "main"  # Branch to compare against (for evaluator)
     feedback_comments: Optional[str] = None
     # Legacy field for backward compatibility
     task_description: Optional[str] = None

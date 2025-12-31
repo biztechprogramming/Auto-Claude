@@ -15,6 +15,7 @@ from core.isolation import IsolationFactory, IsolationStrategy
 def get_isolation_strategy(
     project_dir: Path,
     base_branch: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> IsolationStrategy:
     """
     Get isolation strategy based on .env configuration.
@@ -26,6 +27,7 @@ def get_isolation_strategy(
     Args:
         project_dir: Project directory to isolate
         base_branch: Base branch for worktree/branching (auto-detected if None)
+        model: Optional Claude model to use for Docker containers
 
     Returns:
         IsolationStrategy instance configured based on environment
@@ -33,6 +35,7 @@ def get_isolation_strategy(
     return IsolationFactory.create(
         project_dir=project_dir,
         base_branch=base_branch,
+        model=model,
     )
 
 

@@ -48,6 +48,7 @@ class StartRequest(BaseModel):
     branch_name: str
     base_branch: str = "main"  # Branch to compare against (for evaluator)
     feedback_comments: Optional[str] = None
+    model: str = "claude-3-7-sonnet-20250219"  # Claude model to use (matches previous default)
     # Legacy field for backward compatibility
     task_description: Optional[str] = None
 
@@ -116,9 +117,10 @@ class LogBuffer:
 class BaseContainerServer:
     """Base server for container agents."""
 
-    def __init__(self, name: str, port: int):
+    def __init__(self, name: str, port: int = None):
         self.name = name
-        self.port = port
+        # Allow port to be overridden by environment variable
+        self.port = port or int(os.getenv("CONTAINER_PORT", "8000"))
         self.app = FastAPI(title=f"{name} Container API")
         self.logs = LogBuffer()
 

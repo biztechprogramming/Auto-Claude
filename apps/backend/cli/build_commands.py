@@ -201,9 +201,9 @@ def handle_build_command(
         print("=" * 70)
         print()
 
-        # Get Docker isolation strategy
+        # Get Docker isolation strategy with configured model
         try:
-            isolation = get_isolation_strategy(project_dir, base_branch)
+            isolation = get_isolation_strategy(project_dir, base_branch, model=resolved_model)
         except Exception as e:
             print(f"\n{icon(Icons.ERROR)} Failed to initialize Docker isolation: {e}")
             print("\nTip: Ensure Docker is running and REPO_URL is set.")

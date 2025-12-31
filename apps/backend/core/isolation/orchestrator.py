@@ -17,6 +17,7 @@ from .base import ContainerRole, ContainerResult, FeedbackComment
 from .container_client import ContainerClient, ContainerConfig as ClientConfig
 from .docker.image_builder import ImageBuilder
 from .docker.container_manager import ContainerLifecycleManager
+from .port_allocator import PortAllocator
 
 
 class DockerOrchestrator:
@@ -40,6 +41,7 @@ class DockerOrchestrator:
         memory_limit: str = "4g",
         cpu_shares: str = "1024",
         database_url: Optional[str] = None,
+        model: Optional[str] = None,
     ):
         self.project_dir = project_dir
         self.base_branch = base_branch
@@ -48,6 +50,7 @@ class DockerOrchestrator:
         self.memory_limit = memory_limit
         self.cpu_shares = cpu_shares
         self.database_url = database_url
+        self.model = model
 
         # Compose with specialized components
         self.image_builder = ImageBuilder()
@@ -55,6 +58,7 @@ class DockerOrchestrator:
             memory_limit=memory_limit,
             cpu_shares=cpu_shares,
         )
+        self.port_allocator = PortAllocator()
 
     def _get_container_name(self, spec_name: str, role: ContainerRole) -> str:
         """Generate container name for a spec and role (delegates to container manager)."""
@@ -149,16 +153,24 @@ class DockerOrchestrator:
         import logging
         logger = logging.getLogger(__name__)
 
-        # Get port from workflow config
+        # Get workflow step and allocate port
         from core.isolation.workflow_config import get_step_by_role
         step = get_step_by_role(role)
         if not step:
             raise ValueError(f"No workflow step found for role: {role}")
-        port = step.port
+
+        # Allocate port dynamically (use preferred_port as hint)
+        port = self.port_allocator.find_available_port(
+            preferred_port=step.preferred_port
+        )
+        logger.info(f"Allocated port {port} for {role.value} container")
 
         # Create container config
         container_name = self._get_container_name(spec_name, role)
         env_vars = self._get_base_env_vars()
+
+        # Add allocated port to environment
+        env_vars["CONTAINER_PORT"] = str(port)
 
         # Mount prompts directory as read-only volume
         # This allows prompt changes without rebuilding containers
@@ -247,6 +259,10 @@ class DockerOrchestrator:
                 "spec_content": spec_content,
                 "feedback_comments": feedback_comments,
             }
+
+            # Add model if configured
+            if self.model:
+                task_data["model"] = self.model
 
             # Start task
             logger.info(f"Starting {role.value} task...")
@@ -347,6 +363,10 @@ class DockerOrchestrator:
                         log_stream_process.kill()
                     except:
                         pass
+
+            # Release the allocated port
+            self.port_allocator.release_port(port)
+            logger.info(f"Released port {port} for {role.value} container")
 
             # Keep container running for review (don't stop it)
             pass

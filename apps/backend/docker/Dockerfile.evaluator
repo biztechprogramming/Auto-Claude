@@ -8,10 +8,11 @@ COPY docker/api/evaluator_server.py /api/evaluator_server.py
 # Set working directory
 WORKDIR /api
 
-# Expose API port
-EXPOSE 8002
+# Expose API port range (actual port determined at runtime via CONTAINER_PORT env var)
+# Default range: 8000-8100 for dynamic allocation
+EXPOSE 8000-8100
 
-# Run FastAPI server
+# Run FastAPI server (port configured via CONTAINER_PORT environment variable)
 CMD ["python3", "evaluator_server.py"]
 
 LABEL container.role="evaluator"

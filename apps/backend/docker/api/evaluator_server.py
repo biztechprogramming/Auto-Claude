@@ -29,7 +29,8 @@ class EvaluatorServer(BaseContainerServer):
     """Evaluator container server."""
 
     def __init__(self):
-        super().__init__(name="Evaluator", port=8002)
+        # Port can be overridden via CONTAINER_PORT environment variable
+        super().__init__(name="Evaluator", port=None)
         create_start_endpoint(self)
 
     async def _run_task(self, request: StartRequest):

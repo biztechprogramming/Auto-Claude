@@ -67,8 +67,12 @@ class DockerIsolationStrategy(IsolationStrategy):
         repo_url: Optional[str] = None,
         database_url: Optional[str] = None,
         max_feedback_iterations: int = 3,
+        model: Optional[str] = None,  # Optional model override
     ):
         super().__init__(project_dir, base_branch)
+
+        # Store model for later use
+        self.model = model
 
         # Container images (configurable)
         self.image_developer = image_developer or os.getenv(
@@ -129,6 +133,7 @@ class DockerIsolationStrategy(IsolationStrategy):
             memory_limit=self.memory_limit,
             cpu_shares=self.cpu_shares,
             database_url=self.database_url,
+            model=self.model,  # Pass model to orchestrator
         )
 
     def _detect_repo_url(self) -> str:

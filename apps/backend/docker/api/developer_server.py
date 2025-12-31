@@ -29,7 +29,8 @@ class DeveloperServer(BaseContainerServer):
     """Developer container server."""
 
     def __init__(self):
-        super().__init__(name="Developer", port=8001)
+        # Port can be overridden via CONTAINER_PORT environment variable
+        super().__init__(name="Developer", port=None)
         create_start_endpoint(self)
 
     async def _run_task(self, request: StartRequest):
@@ -135,11 +136,14 @@ class DeveloperServer(BaseContainerServer):
             "context7": {"command": "npx", "args": ["-y", "@upstash/context7-mcp"]},
         }
 
+        # Use model from request (passed from orchestrator configuration)
+        logger.info(f"Using model: {request.model}")
+
         # Create Claude SDK client with proper configuration
         # This matches the pattern used in the working non-Docker version
         client = ClaudeSDKClient(
             options=ClaudeAgentOptions(
-                model="claude-3-7-sonnet-20250219",
+                model=request.model,
                 system_prompt=full_prompt,
                 allowed_tools=["Read", "Write", "Edit", "Glob", "Grep", "Bash", "NotebookEdit"],
                 mcp_servers=mcp_servers,

@@ -71,30 +71,110 @@ Implement the feature described in the specification below. You will write code,
 
 **IMPORTANT**: Follow the patterns from the memory/patterns.md file. Avoid the gotchas listed in memory/gotchas.md.
 
-1. **Break Down the Work**
-   - If an implementation_plan.json exists, follow it
-   - Otherwise, break the spec into logical subtasks yourself
-   - Work on one subtask at a time
+**CRITICAL**: You have access to MCP auto-claude tools for subtask tracking. Use them!
 
-2. **For Each Subtask**:
-   - Read relevant existing code to understand patterns
-   - Implement the changes following existing conventions
-   - Write or update tests
-   - Run tests to verify
-   - Commit with descriptive message
+Available MCP tools:
+- `mcp__auto-claude__get_session_context` - Get current progress and next subtask
+- `mcp__auto-claude__update_subtask_status` - Mark subtasks as in_progress/completed
+- `mcp__auto-claude__record_discovery` - Document what files do for future sessions
+- `mcp__auto-claude__record_gotcha` - Document pitfalls to avoid
+- `mcp__auto-claude__get_build_progress` - Get overall build statistics
 
-3. **Code Quality Standards**:
+1. **Load Session Context and Find Next Subtask**
+
+   Use MCP tools to find what needs to be done:
+
+   ```
+   Tool: mcp__auto-claude__get_session_context
+   Input: {}
+   ```
+
+   This will return:
+   - Current build progress (completed/pending subtasks)
+   - Next subtask to work on (respecting phase dependencies)
+   - Recent session insights and patterns to follow
+   - Gotchas to avoid
+
+   **If no subtasks found**: The implementation plan may not exist yet, or all work is complete.
+
+2. **Work on ONE Subtask at a Time**
+
+   **CRITICAL**: Work on subtasks sequentially, not in batches. Complete one fully before moving to the next.
+
+   For each subtask:
+
+   a. **Mark as In Progress**
+      ```
+      Tool: mcp__auto-claude__update_subtask_status
+      Input: {
+        "subtask_id": "[subtask-id]",
+        "status": "in_progress"
+      }
+      ```
+
+   b. **Read Relevant Files**
+      - Read `files_to_modify` from the subtask
+      - Study `patterns_from` files to match existing code style
+      - Review any related tests
+
+   c. **Implement the Changes**
+      - Follow existing code conventions exactly
+      - Add error handling for edge cases
+      - Write meaningful variable names
+      - Add comments for complex logic only
+      - No console.log/print debugging statements in final code
+
+   d. **Write/Update Tests**
+      - Write tests for new functionality
+      - Update existing tests if behavior changes
+      - Ensure all tests pass before proceeding
+      - Test edge cases and error conditions
+
+   e. **Verify the Subtask**
+      - Run the verification command from the subtask
+      - Check that acceptance criteria are met
+      - Fix any issues immediately (next session has no memory)
+
+   f. **Record Discoveries** (Optional but helpful)
+      ```
+      Tool: mcp__auto-claude__record_discovery
+      Input: {
+        "file_path": "path/to/file.js",
+        "purpose": "Brief description of what this file does",
+        "patterns": ["Pattern 1", "Pattern 2"]
+      }
+      ```
+
+   g. **Mark as Completed**
+      ```
+      Tool: mcp__auto-claude__update_subtask_status
+      Input: {
+        "subtask_id": "[subtask-id]",
+        "status": "completed"
+      }
+      ```
+
+   h. **Commit the Subtask**
+      ```bash
+      git add .
+      git commit -m "auto-claude: Complete [subtask-id] - [description]
+
+      - Files modified: [list]
+      - Verification: passed"
+      ```
+
+3. **Repeat Until All Subtasks Complete**
+
+   After completing a subtask, call `get_session_context` again to find the next one.
+
+   Continue until `get_session_context` returns no more pending subtasks.
+
+4. **Code Quality Standards**:
    - Match existing code style exactly
    - Add error handling for edge cases
    - Write meaningful variable names
    - Add comments for complex logic only
    - No console.log/print debugging statements in final code
-
-4. **Testing Requirements**:
-   - Write tests for new functionality
-   - Update existing tests if behavior changes
-   - Ensure all tests pass before committing
-   - Test edge cases and error conditions
 
 ### Phase 3: Verification
 

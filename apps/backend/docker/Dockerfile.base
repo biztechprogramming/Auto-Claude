@@ -55,6 +55,10 @@ RUN mkdir -p /app/prompts
 # Copy all prompt files and directories into container
 COPY prompts/ /app/prompts/
 
+# Copy agents package (includes MCP auto-claude tools for subtask tracking)
+RUN mkdir -p /app/agents
+COPY agents/ /app/agents/
+
 # Copy FastAPI base server and shared utilities (inherited by all containers)
 RUN mkdir -p /api
 COPY docker/api/base_server.py /api/base_server.py

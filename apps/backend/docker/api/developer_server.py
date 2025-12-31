@@ -131,13 +131,60 @@ class DeveloperServer(BaseContainerServer):
         logger.info(f"Working directory (absolute): {repo_dir.resolve()}")
         logger.info("=" * 70)
 
-        # MCP servers for documentation lookup
+        # MCP servers for documentation lookup and auto-claude tools
         mcp_servers = {
             "context7": {"command": "npx", "args": ["-y", "@upstash/context7-mcp"]},
         }
 
+        # Add auto-claude MCP server for subtask tracking
+        # This provides tools like update_subtask_status, get_session_context, record_discovery
+        try:
+            import sys
+            sys.path.insert(0, "/app")  # Ensure backend modules are importable
+            from agents.tools_pkg.registry import create_auto_claude_mcp_server, is_tools_available
+
+            if is_tools_available():
+                # Find spec directory (should be under /workspace/.auto-claude/specs/)
+                spec_dir = None
+                auto_claude_dir = repo_dir / ".auto-claude" / "specs"
+                if auto_claude_dir.exists():
+                    # Find the spec directory that matches this build
+                    for potential_spec in auto_claude_dir.iterdir():
+                        if potential_spec.is_dir() and (potential_spec / "implementation_plan.json").exists():
+                            spec_dir = potential_spec
+                            break
+
+                if spec_dir:
+                    logger.info(f"Found spec directory: {spec_dir}")
+                    auto_claude_mcp_server = create_auto_claude_mcp_server(spec_dir, repo_dir)
+                    if auto_claude_mcp_server:
+                        mcp_servers["auto-claude"] = auto_claude_mcp_server
+                        logger.info("Added auto-claude MCP server with subtask tracking tools")
+                    else:
+                        logger.warning("Failed to create auto-claude MCP server")
+                else:
+                    logger.warning("No spec directory found - auto-claude MCP tools unavailable")
+            else:
+                logger.warning("SDK tools not available - auto-claude MCP tools unavailable")
+
+        except Exception as e:
+            logger.warning(f"Could not load auto-claude MCP tools: {e}")
+
         # Use model from request (passed from orchestrator configuration)
         logger.info(f"Using model: {request.model}")
+
+        # Build allowed tools list - add MCP auto-claude tool names if available
+        allowed_tools = ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "NotebookEdit"]
+        if "auto-claude" in mcp_servers:
+            # Add auto-claude MCP tool names
+            allowed_tools.extend([
+                "mcp__auto-claude__update_subtask_status",
+                "mcp__auto-claude__get_build_progress",
+                "mcp__auto-claude__record_discovery",
+                "mcp__auto-claude__record_gotcha",
+                "mcp__auto-claude__get_session_context",
+            ])
+            logger.info(f"Added auto-claude MCP tools to allowed list")
 
         # Create Claude SDK client with proper configuration
         # This matches the pattern used in the working non-Docker version
@@ -145,7 +192,7 @@ class DeveloperServer(BaseContainerServer):
             options=ClaudeAgentOptions(
                 model=request.model,
                 system_prompt=full_prompt,
-                allowed_tools=["Read", "Write", "Edit", "Glob", "Grep", "Bash", "NotebookEdit"],
+                allowed_tools=allowed_tools,
                 mcp_servers=mcp_servers,
                 max_turns=100,
                 cwd=str(repo_dir.resolve()),  # Use absolute path for clarity

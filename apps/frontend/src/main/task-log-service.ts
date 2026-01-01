@@ -75,12 +75,13 @@ export class TaskLogService extends EventEmitter {
       return worktreeLogs;
     }
 
-    // Merge logs: planning from main, coding/validation from worktree (if available)
+    // Merge logs: database_analysis/planning from main, coding/validation from worktree (if available)
     const mergedLogs: TaskLogs = {
       spec_id: mainLogs.spec_id,
       created_at: mainLogs.created_at,
       updated_at: worktreeLogs.updated_at > mainLogs.updated_at ? worktreeLogs.updated_at : mainLogs.updated_at,
       phases: {
+        database_analysis: mainLogs.phases.database_analysis || worktreeLogs.phases.database_analysis,
         planning: mainLogs.phases.planning || worktreeLogs.phases.planning,
         // Use worktree logs for coding/validation if they have entries, otherwise fall back to main
         coding: (worktreeLogs.phases.coding?.entries?.length > 0 || worktreeLogs.phases.coding?.status !== 'pending')
@@ -144,7 +145,7 @@ export class TaskLogService extends EventEmitter {
     const logs = this.loadLogs(specDir);
     if (!logs) return null;
 
-    const phases: TaskLogPhase[] = ['planning', 'coding', 'validation'];
+    const phases: TaskLogPhase[] = ['database_analysis', 'planning', 'coding', 'validation'];
     for (const phase of phases) {
       if (logs.phases[phase]?.status === 'active') {
         return phase;
@@ -300,7 +301,7 @@ export class TaskLogService extends EventEmitter {
    * Emit streaming updates for new log entries
    */
   private emitNewEntries(specId: string, previousLogs: TaskLogs | undefined, currentLogs: TaskLogs): void {
-    const phases: TaskLogPhase[] = ['planning', 'coding', 'validation'];
+    const phases: TaskLogPhase[] = ['database_analysis', 'planning', 'coding', 'validation'];
 
     for (const phase of phases) {
       const prevPhase = previousLogs?.phases[phase];

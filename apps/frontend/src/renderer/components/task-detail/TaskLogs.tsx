@@ -16,7 +16,8 @@ import {
   Wrench,
   Info,
   Brain,
-  Cpu
+  Cpu,
+  Database
 } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../ui/collapsible';
@@ -37,18 +38,21 @@ interface TaskLogsProps {
 }
 
 const PHASE_LABELS: Record<TaskLogPhase, string> = {
+  database_analysis: 'Database Analysis',
   planning: 'Planning',
   coding: 'Coding',
   validation: 'Validation'
 };
 
 const PHASE_ICONS: Record<TaskLogPhase, typeof Pencil> = {
+  database_analysis: Database,
   planning: Pencil,
   coding: FileCode,
   validation: FlaskConical
 };
 
 const PHASE_COLORS: Record<TaskLogPhase, string> = {
+  database_analysis: 'text-cyan-500 bg-cyan-500/10 border-cyan-500/30',
   planning: 'text-amber-500 bg-amber-500/10 border-amber-500/30',
   coding: 'text-info bg-info/10 border-info/30',
   validation: 'text-purple-500 bg-purple-500/10 border-purple-500/30'
@@ -56,7 +60,9 @@ const PHASE_COLORS: Record<TaskLogPhase, string> = {
 
 // Map log phases to config phase keys
 // Note: 'planning' log phase covers both spec creation and implementation planning
+// Note: 'database_analysis' uses spec phase config as it runs before coding
 const LOG_PHASE_TO_CONFIG_PHASE: Record<TaskLogPhase, keyof PhaseModelConfig> = {
+  database_analysis: 'spec',  // Database analysis uses spec phase config
   planning: 'spec',  // Planning log phase primarily shows spec creation
   coding: 'coding',
   validation: 'qa'
@@ -133,7 +139,7 @@ export function TaskLogs({
         ) : phaseLogs ? (
           <>
             {/* Phase-based collapsible logs */}
-            {(['planning', 'coding', 'validation'] as TaskLogPhase[]).map((phase) => (
+            {(['database_analysis', 'planning', 'coding', 'validation'] as TaskLogPhase[]).map((phase) => (
               <PhaseLogSection
                 key={phase}
                 phase={phase}

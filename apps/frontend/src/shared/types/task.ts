@@ -55,7 +55,8 @@ export interface QAIssue {
 }
 
 // Task Log Types - for persistent, phase-based logging
-export type TaskLogPhase = 'planning' | 'coding' | 'validation';
+// database_analysis: Analyzes database schema before coding (optional, runs first)
+export type TaskLogPhase = 'database_analysis' | 'planning' | 'coding' | 'validation';
 export type TaskLogPhaseStatus = 'pending' | 'active' | 'completed' | 'failed';
 export type TaskLogEntryType = 'text' | 'tool_start' | 'tool_end' | 'phase_start' | 'phase_end' | 'error' | 'success' | 'info';
 
@@ -87,6 +88,7 @@ export interface TaskLogs {
   created_at: string;
   updated_at: string;
   phases: {
+    database_analysis: TaskPhaseLog;
     planning: TaskPhaseLog;
     coding: TaskPhaseLog;
     validation: TaskPhaseLog;

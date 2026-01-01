@@ -203,13 +203,36 @@ def handle_build_command(
 
         # Get Docker isolation strategy with configured model
         try:
-            isolation = get_isolation_strategy(project_dir, base_branch, model=resolved_model)
+            isolation = get_isolation_strategy(project_dir, base_branch, model=model)
         except Exception as e:
-            print(f"\n{icon(Icons.ERROR)} Failed to initialize Docker isolation: {e}")
-            print("\nTip: Ensure Docker is running and REPO_URL is set.")
-            print("Falling back to worktree mode...")
+            # FAIL LOUDLY: User explicitly configured Docker mode
+            # Don't waste their time by falling back to worktree silently
             print()
-            # Fall through to worktree mode
+            print("=" * 70)
+            print(f"  {icon(Icons.ERROR)} DOCKER ISOLATION FAILED")
+            print("=" * 70)
+            print()
+            print(f"Error: {e}")
+            print()
+            print("Docker isolation is explicitly configured (ISOLATION_METHOD=docker)")
+            print("but failed to initialize. This usually means:")
+            print()
+            print("  1. Docker is not running")
+            print("  2. Docker is not installed")
+            print("  3. REPO_URL is not set or invalid")
+            print("  4. Git remote is not configured")
+            print()
+            print("To fix:")
+            print("  • Start Docker Desktop (or Docker daemon)")
+            print("  • Ensure REPO_URL is set in .env")
+            print("  • Verify: docker ps")
+            print()
+            print("To use worktree mode instead, change .env:")
+            print("  ISOLATION_METHOD=worktree")
+            print()
+            print("=" * 70)
+            print()
+            sys.exit(1)
         else:
             # Load implementation plan
             from implementation_plan import ImplementationPlan

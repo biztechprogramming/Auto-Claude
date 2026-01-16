@@ -348,6 +348,20 @@ def handle_build_command(
         if localized_spec_dir:
             spec_dir = localized_spec_dir
 
+    # Update implementation plan status if in review state (plan approved, ready to code)
+    # This matches the Docker isolation behavior at line 249-254
+    from implementation_plan import ImplementationPlan
+
+    plan_path = spec_dir / "implementation_plan.json"
+    if plan_path.exists():
+        plan_obj = ImplementationPlan.load(plan_path)
+        # If plan is in human_review/review state (waiting for approval), start it
+        if plan_obj.status == "human_review" and plan_obj.planStatus == "review":
+            debug_info("run.py", "Starting implementation (plan approved)")
+            plan_obj.status = "in_progress"
+            plan_obj.planStatus = "in_progress"
+            plan_obj.save(plan_path)
+
     # Run the autonomous agent
     debug_section("run.py", "Starting Build Execution")
     debug(

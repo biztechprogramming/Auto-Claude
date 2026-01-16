@@ -9,10 +9,15 @@ import {
   Check,
   Star,
   Settings,
-  Users
+  Users,
+  Eye,
+  EyeOff,
+  Wrench
 } from 'lucide-react';
 import { Button } from '../ui/button';
+import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import { Separator } from '../ui/separator';
 import { cn } from '../../lib/utils';
 import type { ProjectEnvConfig, ClaudeProfile } from '../../../shared/types';
 
@@ -34,22 +39,32 @@ interface EnvironmentSettingsProps {
   // Collapsible section
   expanded: boolean;
   onToggle: () => void;
+
+  // Advanced Configuration section
+  advancedExpanded: boolean;
+  onAdvancedToggle: () => void;
 }
 
 export function EnvironmentSettings({
   envConfig,
   isLoadingEnv,
   envError,
+  updateEnvConfig,
   isCheckingClaudeAuth,
   claudeAuthStatus,
   handleClaudeSetup,
   expanded,
-  onToggle
+  onToggle,
+  advancedExpanded,
+  onAdvancedToggle
 }: EnvironmentSettingsProps) {
   // Load global Claude profiles to show active account
   const [claudeProfiles, setClaudeProfiles] = useState<ClaudeProfile[]>([]);
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
+
+  // DATABASE_URL visibility toggle
+  const [showDatabaseUrl, setShowDatabaseUrl] = useState(false);
 
   useEffect(() => {
     const loadProfiles = async () => {
@@ -73,6 +88,7 @@ export function EnvironmentSettings({
   const hasAuthenticatedProfiles = claudeProfiles.some(p => p.oauthToken);
 
   return (
+    <>
     <section className="space-y-3">
       <button
         onClick={onToggle}
@@ -244,5 +260,94 @@ export function EnvironmentSettings({
         </div>
       )}
     </section>
+
+    <Separator />
+
+    {/* Advanced Configuration Section */}
+    <section className="space-y-3">
+      <button
+        onClick={onAdvancedToggle}
+        className="w-full flex items-center justify-between text-sm font-semibold text-foreground hover:text-foreground/80"
+      >
+        <div className="flex items-center gap-2">
+          <Wrench className="h-4 w-4" />
+          Advanced Configuration
+        </div>
+        {advancedExpanded ? (
+          <ChevronUp className="h-4 w-4" />
+        ) : (
+          <ChevronDown className="h-4 w-4" />
+        )}
+      </button>
+
+      {advancedExpanded && envConfig && (
+        <div className="space-y-4 pl-6 pt-2">
+          {/* REPO_URL */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-foreground">Repository URL</Label>
+            <p className="text-xs text-muted-foreground">
+              Override the default repository URL for worktree operations
+            </p>
+            <Input
+              placeholder="https://github.com/user/repo.git"
+              value={envConfig.repoUrl || ''}
+              onChange={(e) => updateEnvConfig({ repoUrl: e.target.value || undefined })}
+            />
+          </div>
+
+          {/* DATABASE_URL */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-foreground">Database URL</Label>
+            <p className="text-xs text-muted-foreground">
+              PostgreSQL connection string for containerized environments
+            </p>
+            <div className="relative">
+              <Input
+                type={showDatabaseUrl ? 'text' : 'password'}
+                placeholder="postgresql://user:password@host:5432/database"
+                value={envConfig.databaseUrl || ''}
+                onChange={(e) => updateEnvConfig({ databaseUrl: e.target.value || undefined })}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowDatabaseUrl(!showDatabaseUrl)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label={showDatabaseUrl ? 'Hide database URL' : 'Show database URL'}
+              >
+                {showDatabaseUrl ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+          </div>
+
+          {/* MAX_FEEDBACK_ITERATIONS */}
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-foreground">Max Feedback Iterations</Label>
+            <p className="text-xs text-muted-foreground">
+              Maximum number of feedback iterations for agent builds (default: 3)
+            </p>
+            <Input
+              type="number"
+              min={1}
+              max={10}
+              placeholder="3"
+              value={envConfig.maxFeedbackIterations ?? ''}
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value === '') {
+                  updateEnvConfig({ maxFeedbackIterations: undefined });
+                } else {
+                  const num = parseInt(value, 10);
+                  if (!isNaN(num) && num >= 1 && num <= 10) {
+                    updateEnvConfig({ maxFeedbackIterations: num });
+                  }
+                }
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </section>
+    </>
   );
 }

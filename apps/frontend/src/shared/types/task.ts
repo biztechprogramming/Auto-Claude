@@ -55,7 +55,7 @@ export interface QAIssue {
 }
 
 // Task Log Types - for persistent, phase-based logging
-export type TaskLogPhase = 'planning' | 'coding' | 'validation';
+export type TaskLogPhase = 'planning' | 'coding' | 'validation' | 'testing';
 export type TaskLogPhaseStatus = 'pending' | 'active' | 'completed' | 'failed';
 export type TaskLogEntryType = 'text' | 'tool_start' | 'tool_end' | 'phase_start' | 'phase_end' | 'error' | 'success' | 'info';
 
@@ -90,6 +90,7 @@ export interface TaskLogs {
     planning: TaskPhaseLog;
     coding: TaskPhaseLog;
     validation: TaskPhaseLog;
+    testing: TaskPhaseLog;
   };
 }
 
@@ -236,6 +237,7 @@ export interface Task {
   projectId: string;
   title: string;
   description: string;
+  specMarkdown?: string;  // Full spec.md content for editing
   status: TaskStatus;
   reviewReason?: ReviewReason;  // Why task needs human review (only set when status is 'human_review')
   subtasks: Subtask[];

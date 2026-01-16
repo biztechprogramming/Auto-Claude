@@ -1,0 +1,78 @@
+# Base image for all Auto-Claude containers
+# Contains: Claude SDK, SQL tools, git, common dependencies
+
+FROM node:20-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ca-certificates \
+    curl \
+    postgresql-client \
+    default-mysql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install GitHub CLI
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Claude Code CLI (includes SDK)
+RUN npm install -g @anthropic-ai/claude-code
+
+# Install Python 3.11 for SDK usage (claude-agent-sdk requires Python 3.10+)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Verify Python version (must be 3.10+)
+RUN python3 --version
+
+# Install FastAPI and dependencies for all containers
+# NOTE: pydantic must be 2.12+ for claude-agent-sdk compatibility
+RUN pip3 install --break-system-packages \
+    fastapi==0.115.0 \
+    uvicorn[standard]==0.32.0 \
+    pydantic>=2.12.0 \
+    websockets==14.1
+
+# Install Claude Agent SDK (requires Python 3.10+ and Pydantic 2.12+)
+RUN pip3 install --break-system-packages claude-agent-sdk
+
+# Install golang-migrate for database migrations
+RUN curl -L https://github.com/golang-migrate/migrate/releases/download/v4.17.0/migrate.linux-amd64.tar.gz | tar xvz \
+    && mv migrate /usr/local/bin/migrate
+
+# Create workspace and prompts directory
+RUN mkdir -p /workspace && chown node:node /workspace
+RUN mkdir -p /app/prompts
+
+# Copy all prompt files and directories into container
+COPY prompts/ /app/prompts/
+
+# Copy agents package (includes MCP auto-claude tools for subtask tracking)
+RUN mkdir -p /app/agents
+COPY agents/ /app/agents/
+
+# Copy FastAPI base server and shared utilities (inherited by all containers)
+RUN mkdir -p /api
+COPY docker/api/base_server.py /api/base_server.py
+COPY docker/api/context_loader.py /api/context_loader.py
+
+# Set up git defaults for node user
+RUN su node -c 'git config --global user.email "auto-claude@local"' && \
+    su node -c 'git config --global user.name "Auto-Claude"' && \
+    su node -c 'git config --global init.defaultBranch main'
+
+WORKDIR /workspace
+
+# Run as node user for security
+USER node
+
+# Default command (overridden by orchestrator)
+CMD ["bash"]

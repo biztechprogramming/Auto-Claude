@@ -193,15 +193,45 @@ export class AgentManager extends EventEmitter {
     // Force: When user starts a task from the UI, that IS their approval
     args.push('--force');
 
+    // TEMPORARY: Always pass current branch to test if this fixes the subprocess error
+    // Get current git branch
+    try {
+      const { execSync } = require('child_process');
+      const currentBranch = execSync('git rev-parse --abbrev-ref HEAD', {
+        cwd: projectPath,
+        encoding: 'utf8'
+      }).trim();
+      if (currentBranch && currentBranch !== 'HEAD') {
+        args.push('--base-branch', currentBranch);
+        console.log('[AgentManager] Added current branch to args:', currentBranch);
+      }
+    } catch (error) {
+      console.error('[AgentManager] Failed to get current branch:', error);
+    }
+
     // Pass base branch if specified (ensures worktrees are created from the correct branch)
-    if (options.baseBranch) {
-      args.push('--base-branch', options.baseBranch);
+    console.log('[AgentManager] baseBranch value:', options.baseBranch);
+    console.log('[AgentManager] baseBranch type:', typeof options.baseBranch);
+    if (options.baseBranch && typeof options.baseBranch === 'string' && options.baseBranch.trim()) {
+      // Don't add twice if we already added current branch
+      if (!args.includes('--base-branch')) {
+        args.push('--base-branch', options.baseBranch);
+        console.log('[AgentManager] Added baseBranch to args:', options.baseBranch);
+      }
+    } else {
+      console.log('[AgentManager] Skipped baseBranch - validation failed');
     }
 
     // Note: --parallel was removed from run.py CLI - parallel execution is handled internally by the agent
     // The options.parallel and options.workers are kept for future use or logging purposes
     // Note: Model configuration is read from task_metadata.json by the Python scripts,
     // which allows per-phase configuration for planner, coder, and QA phases
+
+    // Log the full args array before spawning
+    console.log('[AgentManager] Full args array before spawn:');
+    args.forEach((arg, idx) => {
+      console.log(`  [${idx}] type=${typeof arg}, value=${JSON.stringify(arg)}`);
+    });
 
     // Store context for potential restart
     this.storeTaskContext(taskId, projectPath, specId, options, false);

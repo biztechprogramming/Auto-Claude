@@ -39,19 +39,22 @@ interface TaskLogsProps {
 const PHASE_LABELS: Record<TaskLogPhase, string> = {
   planning: 'Planning',
   coding: 'Coding',
-  validation: 'Validation'
+  validation: 'Validation',
+  testing: 'Testing'
 };
 
 const PHASE_ICONS: Record<TaskLogPhase, typeof Pencil> = {
   planning: Pencil,
   coding: FileCode,
-  validation: FlaskConical
+  validation: CheckCircle2,
+  testing: FlaskConical
 };
 
 const PHASE_COLORS: Record<TaskLogPhase, string> = {
   planning: 'text-amber-500 bg-amber-500/10 border-amber-500/30',
   coding: 'text-info bg-info/10 border-info/30',
-  validation: 'text-purple-500 bg-purple-500/10 border-purple-500/30'
+  validation: 'text-green-500 bg-green-500/10 border-green-500/30',
+  testing: 'text-purple-500 bg-purple-500/10 border-purple-500/30'
 };
 
 // Map log phases to config phase keys
@@ -59,7 +62,8 @@ const PHASE_COLORS: Record<TaskLogPhase, string> = {
 const LOG_PHASE_TO_CONFIG_PHASE: Record<TaskLogPhase, keyof PhaseModelConfig> = {
   planning: 'spec',  // Planning log phase primarily shows spec creation
   coding: 'coding',
-  validation: 'qa'
+  validation: 'qa',  // Evaluator container (code review)
+  testing: 'qa'  // QA container (Playwright testing)
 };
 
 // Short labels for models
@@ -133,7 +137,7 @@ export function TaskLogs({
         ) : phaseLogs ? (
           <>
             {/* Phase-based collapsible logs */}
-            {(['planning', 'coding', 'validation'] as TaskLogPhase[]).map((phase) => (
+            {(['planning', 'coding', 'validation', 'testing'] as TaskLogPhase[]).map((phase) => (
               <PhaseLogSection
                 key={phase}
                 phase={phase}

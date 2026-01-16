@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Project, ProjectSettings as ProjectSettingsType, AutoBuildVersionInfo, ProjectEnvConfig, LinearSyncStatus, GitHubSyncStatus } from '../../../../shared/types';
 import { SettingsSection } from '../SettingsSection';
 import { GeneralSettings } from '../../project-settings/GeneralSettings';
@@ -75,6 +76,9 @@ export function SectionRouter({
   handleClaudeSetup,
   onOpenLinearImport
 }: SectionRouterProps) {
+  // Local state for Advanced Configuration section in EnvironmentSettings
+  const [advancedExpanded, setAdvancedExpanded] = useState(false);
+
   switch (activeSection) {
     case 'general':
       return (
@@ -118,6 +122,8 @@ export function SectionRouter({
               setShowClaudeToken={setShowClaudeToken}
               expanded={true}
               onToggle={() => {}}
+              advancedExpanded={advancedExpanded}
+              onAdvancedToggle={() => setAdvancedExpanded(!advancedExpanded)}
             />
           </InitializationGuard>
         </SettingsSection>

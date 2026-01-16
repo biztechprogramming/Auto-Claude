@@ -1112,3 +1112,138 @@ def temp_project(temp_git_repo: Path):
     )
 
     return temp_git_repo
+
+
+# =============================================================================
+# DOCKER ISOLATION FIXTURES
+# =============================================================================
+
+@pytest.fixture
+def docker_git_repo(temp_git_repo: Path):
+    """
+    Git repository fixture with remote configured for Docker tests.
+
+    Sets up a git repo with:
+    - Initial commit on main branch
+    - Configured remote URL (required for DockerIsolationStrategy)
+    - User name and email configured
+    """
+    # Add a fake remote URL
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/test/repo.git"],
+        cwd=temp_git_repo,
+        capture_output=True
+    )
+
+    return temp_git_repo
+
+
+@pytest.fixture
+def docker_strategy(docker_git_repo: Path):
+    """
+    Create a DockerIsolationStrategy instance for testing.
+
+    Provides all required parameters to avoid git detection failures.
+    """
+    from apps.backend.core.isolation.docker_strategy import DockerIsolationStrategy
+
+    return DockerIsolationStrategy(
+        project_dir=docker_git_repo,
+        base_branch="main",
+        repo_url="https://github.com/test/repo.git"
+    )
+
+
+@pytest.fixture
+def orchestrator(docker_git_repo: Path):
+    """
+    Create a DockerOrchestrator instance for testing.
+
+    Provides minimal config with all required parameters.
+    Uses docker_git_repo which has a proper git setup with remote.
+    """
+    from apps.backend.core.isolation.orchestrator import DockerOrchestrator
+    from apps.backend.core.isolation.base import ContainerRole
+
+    return DockerOrchestrator(
+        project_dir=docker_git_repo,
+        base_branch="main",
+        repo_url="https://github.com/test/repo.git",
+        images={
+            ContainerRole.DEVELOPER: "dev:latest",
+            ContainerRole.EVALUATOR: "eval:latest",
+            ContainerRole.QA: "qa:latest",
+        }
+    )
+
+
+@pytest.fixture
+def real_git_repo(docker_git_repo: Path):
+    """
+    Real git repository for E2E Docker tests.
+
+    This fixture supports two modes:
+    1. Temporary repo (default): Uses docker_git_repo for isolated testing
+    2. Persistent repo: Uses E2E_TEST_REPO env var for persistent testing
+
+    Environment Variables:
+    - E2E_TEST_REPO: Path to persistent test repository (optional)
+      Example: E2E_TEST_REPO=C:\dev\ai\test
+
+    Persistent Mode Benefits:
+    - Test actual git push/pull operations
+    - Preserve test artifacts for debugging
+    - Simulate real-world repository operations
+    - Useful for validating Claude SDK code generation
+
+    Provides:
+    - Properly initialized git repository with main branch
+    - Remote URL configured
+    - Git user configured
+    - Initial commits
+    """
+    import os
+
+    # Allow using a persistent test repo for E2E tests
+    persistent_repo = os.environ.get("E2E_TEST_REPO")
+    if persistent_repo:
+        repo_path = Path(persistent_repo)
+        if not repo_path.exists():
+            raise ValueError(
+                f"E2E_TEST_REPO path does not exist: {persistent_repo}\n"
+                f"Please create the repository first or unset E2E_TEST_REPO"
+            )
+        if not (repo_path / ".git").exists():
+            raise ValueError(
+                f"E2E_TEST_REPO is not a git repository: {persistent_repo}\n"
+                f"Please initialize with: git init"
+            )
+        return repo_path
+
+    # Default: use temporary repo
+    return docker_git_repo
+
+
+@pytest.fixture
+def real_repo_url():
+    """
+    Real GitHub repository URL for E2E Docker tests.
+
+    This is a REAL repository that Docker containers will clone.
+    The containers need to be able to:
+    - Clone this repository
+    - Create branches
+    - Commit code
+    - Push changes
+
+    Repository: biztechprogramming/Wexflow
+    URL: git@github.com:biztechprogramming/Wexflow.git
+
+    IMPORTANT: This uses SSH URL. Ensure Docker containers have SSH keys configured,
+    or convert to HTTPS URL if using token authentication.
+    """
+    import os
+
+    # Allow override via environment variable
+    repo_url = os.environ.get("E2E_REPO_URL", "git@github.com:biztechprogramming/Wexflow.git")
+    return repo_url

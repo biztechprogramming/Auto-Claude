@@ -19,14 +19,21 @@ Example Usage:
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import json
 import os
+import sys
 import tempfile
 import time
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any
+
+# Platform-specific imports
+if sys.platform != 'win32':
+    import fcntl
+else:
+    # Windows doesn't have fcntl, we'll use msvcrt instead
+    import msvcrt
 
 
 class FileLockError(Exception):
@@ -88,33 +95,60 @@ class FileLock:
         # Open lock file
         self._fd = os.open(str(self._lock_file), os.O_CREAT | os.O_RDWR)
 
-        # Try to acquire lock with timeout
-        lock_mode = fcntl.LOCK_EX if self.exclusive else fcntl.LOCK_SH
         start_time = time.time()
 
-        while True:
-            try:
-                # Non-blocking lock attempt
-                fcntl.flock(self._fd, lock_mode | fcntl.LOCK_NB)
-                return  # Lock acquired
-            except BlockingIOError:
-                # Lock held by another process
-                elapsed = time.time() - start_time
-                if elapsed >= self.timeout:
-                    os.close(self._fd)
-                    self._fd = None
-                    raise FileLockTimeout(
-                        f"Failed to acquire lock on {self.filepath} within {self.timeout}s"
-                    )
+        if sys.platform != 'win32':
+            # Unix-style locking with fcntl
+            lock_mode = fcntl.LOCK_EX if self.exclusive else fcntl.LOCK_SH
 
-                # Wait a bit before retrying
-                time.sleep(0.01)
+            while True:
+                try:
+                    # Non-blocking lock attempt
+                    fcntl.flock(self._fd, lock_mode | fcntl.LOCK_NB)
+                    return  # Lock acquired
+                except BlockingIOError:
+                    # Lock held by another process
+                    elapsed = time.time() - start_time
+                    if elapsed >= self.timeout:
+                        os.close(self._fd)
+                        self._fd = None
+                        raise FileLockTimeout(
+                            f"Failed to acquire lock on {self.filepath} within {self.timeout}s"
+                        )
+
+                    # Wait a bit before retrying
+                    time.sleep(0.01)
+        else:
+            # Windows-style locking with msvcrt
+            while True:
+                try:
+                    # Try to lock - msvcrt.locking() uses exclusive locks only
+                    # LK_NBLCK = non-blocking exclusive lock
+                    msvcrt.locking(self._fd, msvcrt.LK_NBLCK, 1)
+                    return  # Lock acquired
+                except OSError:
+                    # Lock held by another process
+                    elapsed = time.time() - start_time
+                    if elapsed >= self.timeout:
+                        os.close(self._fd)
+                        self._fd = None
+                        raise FileLockTimeout(
+                            f"Failed to acquire lock on {self.filepath} within {self.timeout}s"
+                        )
+
+                    # Wait a bit before retrying
+                    time.sleep(0.01)
 
     def _release_lock(self) -> None:
         """Release the file lock."""
         if self._fd is not None:
             try:
-                fcntl.flock(self._fd, fcntl.LOCK_UN)
+                if sys.platform != 'win32':
+                    # Unix-style unlock
+                    fcntl.flock(self._fd, fcntl.LOCK_UN)
+                else:
+                    # Windows-style unlock
+                    msvcrt.locking(self._fd, msvcrt.LK_UNLCK, 1)
                 os.close(self._fd)
             except Exception:
                 pass  # Best effort cleanup

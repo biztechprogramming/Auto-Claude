@@ -165,7 +165,7 @@ export class ProjectStore {
         : null,
       tabOrder: tabState.tabOrder.filter(id => validProjectIds.includes(id))
     };
-    console.log('[ProjectStore] Saving tab state:', this.data.tabState);
+    console.debug('[ProjectStore] Saving tab state:', this.data.tabState);
     this.save();
   }
 
@@ -237,24 +237,20 @@ export class ProjectStore {
    * Get tasks for a project by scanning specs directory
    */
   getTasks(projectId: string): Task[] {
-    console.warn('[ProjectStore] getTasks called with projectId:', projectId);
     const project = this.getProject(projectId);
     if (!project) {
-      console.warn('[ProjectStore] Project not found for id:', projectId);
+      console.error('[ProjectStore] Project not found for id:', projectId);
       return [];
     }
-    console.warn('[ProjectStore] Found project:', project.name, 'autoBuildPath:', project.autoBuildPath);
 
     const allTasks: Task[] = [];
     const specsBaseDir = getSpecsDir(project.autoBuildPath);
 
     // 1. Scan main project specs directory
     const mainSpecsDir = path.join(project.path, specsBaseDir);
-    console.warn('[ProjectStore] Main specsDir:', mainSpecsDir, 'exists:', existsSync(mainSpecsDir));
     if (existsSync(mainSpecsDir)) {
       const mainTasks = this.loadTasksFromSpecsDir(mainSpecsDir, project.path, 'main', projectId, specsBaseDir);
       allTasks.push(...mainTasks);
-      console.warn('[ProjectStore] Loaded', mainTasks.length, 'tasks from main project');
     }
 
     // 2. Scan worktree specs directories
@@ -275,7 +271,6 @@ export class ProjectStore {
               specsBaseDir
             );
             allTasks.push(...worktreeTasks);
-            console.warn('[ProjectStore] Loaded', worktreeTasks.length, 'tasks from worktree:', worktree.name);
           }
         }
       } catch (error) {
@@ -293,7 +288,7 @@ export class ProjectStore {
     }
 
     const tasks = Array.from(taskMap.values());
-    console.warn('[ProjectStore] Returning', tasks.length, 'unique tasks (after deduplication)');
+    console.debug('[ProjectStore] Returning', tasks.length, 'unique tasks (after deduplication)');
     return tasks;
   }
 
@@ -339,16 +334,13 @@ export class ProjectStore {
 
         // Try to read spec file for description
         let description = '';
+        let specMarkdown = '';
         if (existsSync(specFilePath)) {
           try {
             const content = readFileSync(specFilePath, 'utf-8');
-            // Extract full Overview section until next heading or end of file
-            // Use \n#{1,6}\s to match valid markdown headings (# to ######) with required space
-            // This avoids truncating at # in code blocks (e.g., Python comments)
-            const overviewMatch = content.match(/## Overview\s*\n+([\s\S]*?)(?=\n#{1,6}\s|$)/);
-            if (overviewMatch) {
-              description = overviewMatch[1].trim();
-            }
+            // Load full spec.md content for both description and specMarkdown
+            description = content;
+            specMarkdown = content;
           } catch {
             // Ignore read errors
           }
@@ -452,6 +444,7 @@ export class ProjectStore {
           projectId,
           title,
           description,
+          specMarkdown, // Full spec.md content for editing
           status,
           reviewReason,
           subtasks,

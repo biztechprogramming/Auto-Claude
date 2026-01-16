@@ -6,6 +6,7 @@ CLI commands for building specs and handling the main build flow.
 """
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -46,6 +47,12 @@ from workspace import (
 from .input_handlers import (
     read_from_file,
     read_multiline_input,
+)
+
+# Docker isolation adapter
+from core.isolation_adapter import (
+    should_use_docker_isolation,
+    get_isolation_strategy,
 )
 
 
@@ -180,6 +187,138 @@ def handle_build_command(
                 # User chose to start fresh or merged existing
                 pass
 
+    # ============================================================================
+    # DOCKER ISOLATION MODE
+    # ============================================================================
+    # If ISOLATION_METHOD=docker in .env, use Docker containers instead of worktrees
+    if should_use_docker_isolation():
+        print(f"\n{icon(Icons.DOCKER)} Docker Isolation Mode")
+        print("=" * 70)
+        print("Using Docker containers for isolated build execution.")
+        print("  • Developer container: Implements code")
+        print("  • Evaluator container: Reviews quality")
+        print("  • QA container: Runs tests")
+        print("=" * 70)
+        print()
+
+        # Get Docker isolation strategy with configured model
+        try:
+            isolation = get_isolation_strategy(project_dir, base_branch, model=model)
+        except Exception as e:
+            # FAIL LOUDLY: User explicitly configured Docker mode
+            # Don't waste their time by falling back to worktree silently
+            print()
+            print("=" * 70)
+            print(f"  {icon(Icons.ERROR)} DOCKER ISOLATION FAILED")
+            print("=" * 70)
+            print()
+            print(f"Error: {e}")
+            print()
+            print("Docker isolation is explicitly configured (ISOLATION_METHOD=docker)")
+            print("but failed to initialize. This usually means:")
+            print()
+            print("  1. Docker is not running")
+            print("  2. Docker is not installed")
+            print("  3. REPO_URL is not set or invalid")
+            print("  4. Git remote is not configured")
+            print()
+            print("To fix:")
+            print("  • Start Docker Desktop (or Docker daemon)")
+            print("  • Ensure REPO_URL is set in .env")
+            print("  • Verify: docker ps")
+            print()
+            print("To use worktree mode instead, change .env:")
+            print("  ISOLATION_METHOD=worktree")
+            print()
+            print("=" * 70)
+            print()
+            sys.exit(1)
+        else:
+            # Load implementation plan
+            from implementation_plan import ImplementationPlan
+
+            plan_path = spec_dir / "implementation_plan.json"
+            if not plan_path.exists():
+                print(f"\n{icon(Icons.ERROR)} Implementation plan not found: {plan_path}")
+                print("Run spec creation first to generate the plan.")
+                sys.exit(1)
+
+            # Load and update plan status
+            plan_obj = ImplementationPlan.load(plan_path)
+
+            # If plan is in human_review/review state (waiting for approval), start it
+            if plan_obj.status == "human_review" and plan_obj.planStatus == "review":
+                print(f"{icon(Icons.INFO)} Starting implementation (plan approved)")
+                plan_obj.status = "in_progress"
+                plan_obj.planStatus = "in_progress"
+                plan_obj.save(plan_path)
+
+            # Convert to dict for Docker orchestrator
+            plan = plan_obj.to_dict()
+
+            # Setup Docker images (builds if needed)
+            print("Setting up Docker environment...")
+            isolation.setup()
+            print(f"{icon(Icons.SUCCESS)} Docker images ready\n")
+
+            # Status callback for updates
+            status_manager = StatusManager(project_dir)
+
+            def on_status_change(spec_name: str, status: str, message: str = ""):
+                """Handle status updates from Docker pipeline."""
+                print(f"\n[{spec_name}] {status}: {message}")
+
+                # Update status manager
+                status_map = {
+                    "planning": BuildState.PLANNING,
+                    "coding": BuildState.BUILDING,
+                    "ai_review": BuildState.BUILDING,
+                    "ai_testing": BuildState.QA,
+                    "needs_revision": BuildState.BUILDING,
+                    "ready_for_review": BuildState.COMPLETE,
+                    "failed": BuildState.ERROR,
+                }
+                build_state = status_map.get(status, BuildState.BUILDING)
+                status_manager.update(state=build_state)
+
+            # Run Docker pipeline
+            try:
+                success = asyncio.run(
+                    isolation.run_pipeline(
+                        spec_name=spec_dir.name,
+                        plan=plan,
+                        on_status_change=on_status_change,
+                    )
+                )
+
+                if success:
+                    print("\n" + "=" * 70)
+                    print(f"  {icon(Icons.SUCCESS)} DOCKER PIPELINE COMPLETED")
+                    print("=" * 70)
+                    print("\nAll containers completed successfully.")
+                    print("Changes have been pushed to the remote repository.")
+                    print(f"\nBranch: auto-claude/{spec_dir.name}")
+                    print()
+                else:
+                    print("\n" + "=" * 70)
+                    print(f"  {icon(Icons.ERROR)} DOCKER PIPELINE FAILED")
+                    print("=" * 70)
+                    print("\nOne or more containers failed.")
+                    print(f"Check container logs for details.")
+                    print()
+                    sys.exit(1)
+
+            except KeyboardInterrupt:
+                print("\n\nDocker pipeline interrupted.")
+                print(f"Resume: python auto-claude/run.py --spec {spec_dir.name}")
+                sys.exit(130)
+
+            # Docker mode complete - skip worktree workflow
+            return
+
+    # ============================================================================
+    # WORKTREE ISOLATION MODE (Default)
+    # ============================================================================
     # Choose workspace (skip for parallel mode - it always uses worktrees)
     working_dir = project_dir
     worktree_manager = None
@@ -208,6 +347,20 @@ def handle_build_command(
         # Use the localized spec directory (inside worktree) for AI access
         if localized_spec_dir:
             spec_dir = localized_spec_dir
+
+    # Update implementation plan status if in review state (plan approved, ready to code)
+    # This matches the Docker isolation behavior at line 249-254
+    from implementation_plan import ImplementationPlan
+
+    plan_path = spec_dir / "implementation_plan.json"
+    if plan_path.exists():
+        plan_obj = ImplementationPlan.load(plan_path)
+        # If plan is in human_review/review state (waiting for approval), start it
+        if plan_obj.status == "human_review" and plan_obj.planStatus == "review":
+            debug_info("run.py", "Starting implementation (plan approved)")
+            plan_obj.status = "in_progress"
+            plan_obj.planStatus = "in_progress"
+            plan_obj.save(plan_path)
 
     # Run the autonomous agent
     debug_section("run.py", "Starting Build Execution")
@@ -469,3 +622,225 @@ def _handle_build_interrupt(
         content.append(muted("Your build is in a separate workspace and is safe."))
     print(box(content, width=70, style="light"))
     print()
+
+
+def _handle_docker_build(
+    project_dir: Path,
+    spec_dir: Path,
+    model: str,
+    base_branch: str | None,
+    auto_continue: bool,
+    skip_qa: bool,
+) -> None:
+    """
+    Handle build using Docker isolation mode.
+
+    Uses IsolationFactory to create Docker containers for development, evaluation, and QA.
+
+    Args:
+        project_dir: Project root directory
+        spec_dir: Spec directory path
+        model: Model to use
+        base_branch: Base branch for branching
+        auto_continue: Auto-continue mode
+        skip_qa: Skip QA validation
+    """
+    from core.isolation.factory import IsolationFactory
+    import json
+
+    print()
+    print("=" * 70)
+    print("  DOCKER ISOLATION MODE")
+    print("=" * 70)
+    print()
+    print("Using multi-container pipeline:")
+    print("  • Developer container - implements changes")
+    print("  • Evaluator container - reviews code quality")
+    print("  • QA container - runs automated tests")
+    print()
+
+    # Load implementation plan
+    plan_file = spec_dir / "implementation_plan.json"
+    if not plan_file.exists():
+        print(f"Error: Implementation plan not found: {plan_file}")
+        print("Run spec creation first: python auto-claude/spec_runner.py")
+        sys.exit(1)
+
+    with open(plan_file) as f:
+        plan = json.load(f)
+
+    # Create isolation strategy (reads ISOLATION_METHOD from env)
+    try:
+        strategy = IsolationFactory.create(
+            project_dir=project_dir,
+            base_branch=base_branch,
+            method="docker",  # Explicit docker mode
+        )
+    except Exception as e:
+        print(f"Error creating Docker strategy: {e}")
+        print("\nPossible issues:")
+        print("  • Docker not installed or not running")
+        print("  • Docker images not built")
+        print("\nTo build images:")
+        print("  cd apps/backend/docker")
+        print("  docker build -f Dockerfile.base -t auto-claude-base:latest .")
+        print("  docker build -f Dockerfile.developer -t auto-claude-dev:latest .")
+        print("  docker build -f Dockerfile.evaluator -t auto-claude-eval:latest .")
+        print("  docker build -f Dockerfile.qa -t auto-claude-qa:latest .")
+        sys.exit(1)
+
+    # Setup (builds images if needed)
+    print("Setting up Docker environment...")
+    try:
+        strategy.setup()
+    except Exception as e:
+        print(f"Error setting up Docker: {e}")
+        sys.exit(1)
+
+    # Status callback for kanban updates
+    status_manager = StatusManager(project_dir)
+
+    def on_status_change(spec_name: str, status: str, message: str = ""):
+        """Handle status updates from Docker pipeline."""
+        print(f"\n[{spec_name}] {status}: {message}")
+
+        # Update status manager
+        status_map = {
+            "planning": BuildState.PLANNING,
+            "coding": BuildState.BUILDING,
+            "ai_review": BuildState.BUILDING,
+            "ai_testing": BuildState.QA,
+            "needs_revision": BuildState.BUILDING,
+            "ready_for_review": BuildState.COMPLETE,
+            "failed": BuildState.ERROR,
+        }
+        build_state = status_map.get(status, BuildState.BUILDING)
+        status_manager.update(state=build_state)
+
+    # Run the Docker pipeline
+    print()
+    print("=" * 70)
+    print("  STARTING BUILD PIPELINE")
+    print("=" * 70)
+    print()
+
+    try:
+        success = asyncio.run(
+            strategy.run_pipeline(
+                spec_name=spec_dir.name,
+                plan=plan,
+                on_status_change=on_status_change,
+            )
+        )
+
+        if success:
+            print()
+            print("=" * 70)
+            print("  ✅ BUILD SUCCEEDED")
+            print("=" * 70)
+            print()
+            print("All checks passed! The build is ready for human review.")
+            print()
+
+            # Show container status
+            container_status = strategy.get_container_status(spec_dir.name)
+            print("Container status:")
+            for role, state in container_status.items():
+                icon_map = {
+                    "running": "🟢",
+                    "stopped": "🟡",
+                    "not_found": "⚪",
+                }
+                print(f"  {icon_map.get(state, '⚪')} {role}: {state}")
+            print()
+
+            # Show merge instructions
+            print("To merge the changes:")
+            print(f"  python auto-claude/run.py --spec {spec_dir.name} --merge")
+            print()
+            print("To review changes:")
+            print(f"  git diff main...auto-claude/{spec_dir.name}")
+            print()
+            print("Note: Docker containers will be cleaned up automatically after merge.")
+            print()
+
+        else:
+            print()
+            print("=" * 70)
+            print("  ⚠️  BUILD INCOMPLETE")
+            print("=" * 70)
+            print()
+            print("The build did not complete successfully.")
+            print("Check the output above for details.")
+            print()
+
+            # Show container status
+            container_status = strategy.get_container_status(spec_dir.name)
+            print("Container status:")
+            for role, state in container_status.items():
+                icon_map = {
+                    "running": "🟢",
+                    "stopped": "🟡",
+                    "not_found": "⚪",
+                }
+                print(f"  {icon_map.get(state, '⚪')} {role}: {state}")
+            print()
+
+            print("To clean up containers:")
+            print(f"  python auto-claude/run.py --spec {spec_dir.name} --discard")
+            print()
+
+    except KeyboardInterrupt:
+        print()
+        print("=" * 70)
+        print("  ⏸️  BUILD PAUSED")
+        print("=" * 70)
+        print()
+        print("Build was interrupted.")
+        print()
+        print("To resume:")
+        print(f"  python auto-claude/run.py --spec {spec_dir.name}")
+        print()
+        print("Note: Docker containers are still running and will be reused on resume.")
+        print()
+
+        # Show container status
+        container_status = strategy.get_container_status(spec_dir.name)
+        print("Container status:")
+        for role, state in container_status.items():
+            icon_map = {
+                "running": "🟢",
+                "stopped": "🟡",
+                "not_found": "⚪",
+            }
+            print(f"  {icon_map.get(state, '⚪')} {role}: {state}")
+        print()
+
+        sys.exit(0)
+    except Exception as e:
+        print()
+        print("=" * 70)
+        print("  ❌ BUILD FAILED")
+        print("=" * 70)
+        print()
+        print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
+        print()
+
+        # Show container status for debugging
+        try:
+            container_status = strategy.get_container_status(spec_dir.name)
+            print("Container status:")
+            for role, state in container_status.items():
+                icon_map = {
+                    "running": "🟢",
+                    "stopped": "🟡",
+                    "not_found": "⚪",
+                }
+                print(f"  {icon_map.get(state, '⚪')} {role}: {state}")
+            print()
+        except:
+            pass
+
+        sys.exit(1)

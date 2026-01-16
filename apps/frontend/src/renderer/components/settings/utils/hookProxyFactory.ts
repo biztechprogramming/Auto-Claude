@@ -35,6 +35,8 @@ export function createHookProxy(
     get setShowOpenAIKey() { return hookRef.current.setShowOpenAIKey; },
     get showGitHubToken() { return hookRef.current.showGitHubToken; },
     get setShowGitHubToken() { return hookRef.current.setShowGitHubToken; },
+    get showDatabaseUrl() { return hookRef.current.showDatabaseUrl; },
+    get setShowDatabaseUrl() { return hookRef.current.setShowDatabaseUrl; },
     get expandedSections() { return hookRef.current.expandedSections; },
     get toggleSection() { return hookRef.current.toggleSection; },
     get gitHubConnectionStatus() { return hookRef.current.gitHubConnectionStatus; },

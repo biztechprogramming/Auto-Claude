@@ -326,10 +326,14 @@ export function createGenerationScript(prompt: string, claudePath: string): stri
   // Escape the claude path for Python string
   const escapedClaudePath = claudePath.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
+  // On Windows, we need shell=True to execute .ps1 and .cmd files
+  const isWindows = process.platform === 'win32';
+
   return `
 import subprocess
 import sys
 import base64
+import platform
 
 try:
     # Decode the base64 prompt to avoid string escaping issues
@@ -337,12 +341,14 @@ try:
 
     # Use Claude Code CLI to generate
     # stdin=DEVNULL prevents hanging when claude checks for interactive input
+    # shell=True on Windows to handle .ps1 and .cmd files
     result = subprocess.run(
         ['${escapedClaudePath}', '-p', prompt, '--output-format', 'text', '--model', 'haiku'],
         capture_output=True,
         text=True,
         stdin=subprocess.DEVNULL,
-        timeout=300
+        timeout=300,
+        shell=${isWindows ? 'True' : 'False'}
     )
 
     if result.returncode == 0:
